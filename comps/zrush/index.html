@@ -135,7 +135,7 @@ function assignTexture(slide) {
   loader.load(nextUrl(), (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     const a = tex.image.width / tex.image.height;
-    slide.mesh.scale.set(a >= 1 ? 7.5 * a : 7.5, a >= 1 ? 7.5 : 7.5 / a, 1);
+    slide.mesh.scale.set(a >= 1 ? 4.2 * a : 4.2, a >= 1 ? 4.2 : 4.2 / a, 1);
     slide.mat.map = tex;
     slide.mat.needsUpdate = true;
   });
@@ -144,7 +144,7 @@ function assignTexture(slide) {
 const slides = [];
 function buildSlides() {
   for (let i = 0; i < PLANES; i++) {
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true, transparent: true });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
     // center-weighted: the work parades through the middle of the frame,
     // alternating gently off-axis so planes never fully eclipse each other
@@ -170,12 +170,18 @@ function render(t) {
   const dt = Math.min((t - lastT) / 1000, 0.1);
   lastT = t;
 
-  impulse *= Math.pow(0.4, dt);             // softer attack, longer decay
-  speed = 0.85 + impulse * 2.4;
+  // glide-step: almost still between ticks, a clear push on each beat —
+  // the motion IS the rhythm
+  impulse *= Math.pow(0.1, dt);
+  speed = 0.18 + impulse * 3.4;
 
   for (const s of slides) {
     s.mesh.position.z += speed * dt;
-    if (s.mesh.position.z > 2) {
+    const z = s.mesh.position.z;
+    // recycle BEFORE the plane outgrows the viewport — the work is always
+    // fully visible; a short fade covers the exit
+    s.mat.opacity = Math.min(1, Math.max(0, (z + 3.4) / -1.0));
+    if (z > -3.3) {
       s.mesh.position.z -= PLANES * SPACING;
       assignTexture(s);
     }

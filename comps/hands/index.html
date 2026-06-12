@@ -119,6 +119,15 @@ master.gain.value = 1;
 master.connect(ctx.destination);
 let muted = false;
 
+// pad chords — one per minute, slow-glide retune (Am, F, C, G ambient set)
+const CHORDS = [
+  [110.00, 164.81, 220.60],
+  [87.31, 130.81, 174.61],
+  [130.81, 196.00, 261.63],
+  [98.00, 146.83, 196.00],
+];
+const padOscs = [];
+
 function startPad() {
   const lp = ctx.createBiquadFilter();
   lp.type = 'lowpass'; lp.frequency.value = 520;
@@ -130,12 +139,32 @@ function startPad() {
     o.type = 'sine'; o.frequency.value = f;
     const og = ctx.createGain(); og.gain.value = g;
     o.connect(og); og.connect(lp); o.start();
+    padOscs.push(o);
   });
   const lfo = ctx.createOscillator();
   lfo.frequency.value = 1 / 16;
   const lfoGain = ctx.createGain();
   lfoGain.gain.value = 0.014;
   lfo.connect(lfoGain); lfoGain.connect(padGain.gain); lfo.start();
+}
+
+function setChordAt(when, minute) {
+  const chord = CHORDS[minute % CHORDS.length];
+  padOscs.forEach((o, i) => o.frequency.setTargetAtTime(chord[i], when, 0.8));
+}
+
+// quiet pentatonic pluck on odd seconds — deterministic melody, the
+// "alive" layer over the drone
+const PENTA = [220, 261.63, 293.66, 329.63, 392, 440];
+function pluckAt(when, sec, minute) {
+  const o = ctx.createOscillator();
+  o.type = 'triangle';
+  o.frequency.value = PENTA[(sec * 7 + minute * 3) % PENTA.length];
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.032, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.5);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.55);
 }
 
 let noiseBuf = null;
@@ -194,6 +223,7 @@ function sector(g, a0, a1, R) {
 // ── wedge engine ──
 let wedgeStart = 0;       // seconds-into-minute where the live wedge began
 let pendingBake = null;   // image waiting to be committed
+let lastWedgeIndex = -1;  // absolute wedge counter (wallSec / wedge)
 
 function wedgeSec() { return TEMPI[tempo].wedge; }
 
@@ -269,7 +299,6 @@ function drawFrame() {
   hand(angleOf(hourPos, 12), Math.min(W, H) * 0.21, 7);
   hand(angleOf(date.getMinutes() + sec / 60, 60), Math.min(W, H) * 0.34, 4);
   hand(angleOf(steppedSec, 60), R, 1.5);
-  hand(angleOf(steppedSec, 60), R, 6, 0.22);
 
   // center pivot
   x.save();
@@ -291,12 +320,21 @@ conductor.onBeat((beat) => {
   const nextS = (s + 1) % 60;
   tickAt(when);
   if (nextS % wedgeSec() === 0) tockAt(when);
-  if (nextS === 0) gongAt(when);
+  if (nextS % 2 === 1) pluckAt(when, nextS, beat.date.getMinutes());
+  if (nextS === 0) {
+    gongAt(when);
+    setChordAt(when, beat.date.getMinutes() + 1);
+  }
 
-  if (s % wedgeSec() === 0 && s !== wedgeStart) rotateWedge(s);
-  if (s === 0) {
-    rotateWedge(0);
-    advanceSet();
+  // advance the set first so a new minute's first wedge draws from it
+  if (s === 0) advanceSet();
+  // wedge identity by absolute index — rotates exactly once per boundary,
+  // works at every tempo including the full-minute wedge
+  const idx = Math.floor(beat.wallSec / wedgeSec());
+  if (lastWedgeIndex === -1) lastWedgeIndex = idx;
+  else if (idx !== lastWedgeIndex) {
+    lastWedgeIndex = idx;
+    rotateWedge(s);
   }
 
   statusEl.textContent = `${TEMPI[tempo].name} · SET ${String(setIndex + 1).padStart(2, '0')}\n${beat.date.toTimeString().slice(0, 8)}`;
