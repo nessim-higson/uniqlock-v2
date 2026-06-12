@@ -56,9 +56,32 @@ let VW = window.innerWidth, VH = window.innerHeight;
 const camera = new THREE.PerspectiveCamera(60, VW / VH, 0.1, 120);
 camera.position.z = 0;
 
+// the void: warm charcoal with a soft radial lift behind the tunnel —
+// dark imagery silhouettes against it instead of dissolving into black
+const VOID = 0x232120;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
-scene.fog = new THREE.Fog(0x000000, 24, 85);
+scene.background = new THREE.Color(VOID);
+scene.fog = new THREE.Fog(VOID, 24, 85);
+
+function makeBackdrop() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(256, 256, 40, 256, 256, 360);
+  grad.addColorStop(0, '#403b37');
+  grad.addColorStop(0.55, '#2b2826');
+  grad.addColorStop(1, '#191717');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 512, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshBasicMaterial({ map: tex, fog: false });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+  mesh.position.z = -100;
+  mesh.scale.set(300, 300, 1);
+  scene.add(mesh);
+}
+makeBackdrop();
 
 let rt = new THREE.WebGLRenderTarget(VW * renderer.getPixelRatio(), VH * renderer.getPixelRatio());
 
@@ -165,6 +188,17 @@ function buildSlides() {
 let speed = 0;
 let impulse = 0;
 let lastT = 0;
+let disp = 0.42;
+
+// distortion choreography keyed to the frontmost image's journey:
+// loud when a new image enters deep in the tunnel, settling to almost
+// nothing at hero placement, building again as it closes on the camera
+function dispTarget(zf) {
+  if (zf <= -16) return 0.42;
+  if (zf <= -8) return 0.42 + ((zf + 16) / 8) * (0.08 - 0.42);
+  if (zf <= -6) return 0.08;
+  return 0.08 + Math.min(1, (zf + 6) / 2.7) * (0.55 - 0.08);
+}
 
 function render(t) {
   const dt = Math.min((t - lastT) / 1000, 0.1);
@@ -175,6 +209,7 @@ function render(t) {
   impulse *= Math.pow(0.1, dt);
   speed = 0.18 + impulse * 3.4;
 
+  let zFront = -Infinity;
   for (const s of slides) {
     s.mesh.position.z += speed * dt;
     const z = s.mesh.position.z;
@@ -184,9 +219,13 @@ function render(t) {
     if (z > -3.3) {
       s.mesh.position.z -= PLANES * SPACING;
       assignTexture(s);
+    } else if (z > zFront) {
+      zFront = z;
     }
   }
 
+  disp += (dispTarget(zFront) - disp) * Math.min(1, dt * 4);
+  lensMat.uniforms.displacement.value = disp;
   lensMat.uniforms.time.value = t;
   lensMat.uniforms.scrollDif.value = impulse * 0.7;
 
