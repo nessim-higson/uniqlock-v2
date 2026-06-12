@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 09 — morph quilt</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<div id="label">COMP 09 — MORPH QUILT · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">MORPH QUILT</div>
+  <div class="prompt">one fabric, three bands, no cuts: each image's pixels BECOME the
+  next on the beat,<br>displaced by their own luminance. the bands hold 3, 4 and 5
+  beats — a polyrhythm that<br>aligns once a minute.</div>
+  <div class="prompt">m mute · click to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import * as THREE from 'three';
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { loadImageryManifest } from '../../js/data.js';
+
+const overlay = document.getElementById('overlay');
+const statusEl = document.getElementById('status');
+
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ── three bands, three holds: a 3/4/5 polyrhythm against the second ──
+const HOLDS = [3, 4, 5];
+const WIDTHS = [0.34, 0.33, 0.33];
+const TRANSITION = 0.7; // seconds of morph at each band boundary
+
+let manifest = [];
+function imageForSerial(band, serial) {
+  const rng = mulberry32(((serial * 2654435761) ^ (band * 19349663)) >>> 0);
+  return manifest[Math.floor(rng() * manifest.length)];
+}
+
+// ── renderer ──
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+camera.position.z = 1;
+
+const frag = `
+  varying vec2 vUv;
+  uniform sampler2D tA; uniform sampler2D tB;
+  uniform float prog; uniform float strength;
+  uniform vec2 sA; uniform vec2 oA; uniform vec2 sB; uniform vec2 oB;
+  void main() {
+    vec2 ua = vUv * sA + oA;
+    vec2 ub = vUv * sB + oB;
+    vec4 a0 = texture2D(tA, ua);
+    vec2 dv = (a0.rg - 0.5) * strength;
+    float p = smoothstep(0.0, 1.0, prog);
+    vec4 ca = texture2D(tA, ua + dv * p);
+    vec4 cb = texture2D(tB, ub - dv * (1.0 - p));
+    float m = smoothstep(0.12, 0.88, p + (a0.r - 0.5) * 0.25);
+    gl_FragColor = mix(ca, cb, m);
+  }
+`;
+const vert = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+
+const bands = HOLDS.map((hold, i) => {
+  const x0 = -1 + WIDTHS.slice(0, i).reduce((a, b) => a + b * 2, 0);
+  const w = WIDTHS[i] * 2;
+  const geo = new THREE.PlaneGeometry(w, 2);
+  geo.translate(x0 + w / 2, 0, 0);
+  const mat = new THREE.ShaderMaterial({
+    vertexShader: vert,
+    fragmentShader: frag,
+    uniforms: {
+      tA: { value: null }, tB: { value: null },
+      prog: { value: 0 }, strength: { value: 0.32 },
+      sA: { value: new THREE.Vector2(1, 1) }, oA: { value: new THREE.Vector2(0, 0) },
+      sB: { value: new THREE.Vector2(1, 1) }, oB: { value: new THREE.Vector2(0, 0) },
+    },
+  });
+  scene.add(new THREE.Mesh(geo, mat));
+  return { hold, mat, widthFrac: WIDTHS[i], shownSerial: -1 };
+});
+
+// ── texture cache ──
+const loader = new THREE.TextureLoader();
+const texCache = new Map();
+function ensureTex(url) {
+  if (texCache.has(url)) return texCache.get(url);
+  const entry = { tex: null, w: 1, h: 1, ready: false };
+  loader.load(url, (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    entry.tex = t;
+    entry.w = t.image.width;
+    entry.h = t.image.height;
+    entry.ready = true;
+  });
+  texCache.set(url, entry);
+  return entry;
+}
+
+function coverUniforms(entry, widthFrac, sV, oV) {
+  const bw = innerWidth * widthFrac, bh = innerHeight;
+  const s = Math.max(bw / entry.w, bh / entry.h);
+  const sx = bw / (entry.w * s), sy = bh / (entry.h * s);
+  sV.set(sx, sy);
+  oV.set((1 - sx) / 2, (1 - sy) / 2);
+}
+
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+}
+addEventListener('resize', resize);
+resize();
+
+// ── render: fully stateless — band textures and morph progress are pure
+// functions of the clock, so the quilt is a broadcast too ──
+let impulse = 0;
+let lastT = 0;
+
+function render(t) {
+  const dt = Math.min((t - lastT) / 1000, 0.1);
+  lastT = t;
+  impulse *= Math.pow(0.15, dt);
+
+  const phase = conductor.phase();
+  for (const band of bands) {
+    const serial = Math.floor(phase / band.hold);
+    const tIn = phase - serial * band.hold;
+    const prog = tIn < TRANSITION ? tIn / TRANSITION : 1;
+
+    const eA = ensureTex(imageForSerial(bands.indexOf(band), serial));
+    const eB = ensureTex(imageForSerial(bands.indexOf(band), serial + 1));
+    ensureTex(imageForSerial(bands.indexOf(band), serial + 2));
+
+    if (eA.ready && eB.ready) {
+      band.mat.uniforms.tA.value = eA.tex;
+      band.mat.uniforms.tB.value = eB.tex;
+      coverUniforms(eA, band.widthFrac, band.mat.uniforms.sA.value, band.mat.uniforms.oA.value);
+      coverUniforms(eB, band.widthFrac, band.mat.uniforms.sB.value, band.mat.uniforms.oB.value);
+      band.mat.uniforms.prog.value = prog;
+    }
+    band.mat.uniforms.strength.value = 0.32 + impulse * 0.12;
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(render);
+}
+
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  impulse = 1;
+  statusEl.textContent = `LIVE · 3:4:5 · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+// ── entry ──
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    manifest = await manifestReady;
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch((err) => {
+      console.warn('[quilt] music failed, running silent:', err);
+      statusEl.textContent = 'music failed — running silent';
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) music.toggleMute();
+});
+</script>
+
+</body>
+</html>
