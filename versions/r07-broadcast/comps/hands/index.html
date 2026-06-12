@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 04 — hands</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  canvas#c { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; text-align: right; }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="label">COMP 04 — HANDS · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">HANDS</div>
+  <div class="prompt">three concentric rings of the archive, all revealing at once —<br>
+  the outer ring turns fast, the middle slower, the core slowest.<br>
+  one hand sweeps them all.</div>
+  <div class="prompt">1 / 2 / 3 — tempo · m mute · click to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { HOUR_COLORS, loadImageryManifest } from '../../js/data.js';
+
+const canvas = document.getElementById('c');
+const x = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const statusEl = document.getElementById('status');
+
+const conductor = createConductor();
+const { ctx } = conductor;
+
+// ── tempo: per-ring cadences in seconds (all divide 60 — wedges never
+//    wrap midnight on the face). The second is sacred at every setting. ──
+const TEMPI = {
+  1: { cad: [10, 30, 60], name: 'SLOW' },
+  2: { cad: [5, 15, 60],  name: 'MEDIUM' },
+  3: { cad: [3, 10, 30],  name: 'FAST' },
+};
+let tempo = 2;
+
+// ── canvas ──
+let W, H, DPR;
+function sizeCanvas(c2) {
+  c2.width = W * DPR; c2.height = H * DPR;
+  c2.getContext('2d').setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+
+function drawCover(g, img) {
+  const s = Math.max(W / img.width, H / img.height);
+  g.drawImage(img, (W - img.width * s) / 2, (H - img.height * s) / 2, img.width * s, img.height * s);
+}
+
+// ── three rings, each an independent reveal running on its own cadence ──
+// rings[0] = outer, rings[1] = middle, rings[2] = core
+const rings = [0, 1, 2].map(() => ({
+  baked: null, liveImg: null, wedgeStart: 0, lastIdx: -1,
+}));
+
+function ringRadii(i) {
+  const m = Math.min(W, H);
+  const rMax = Math.hypot(W, H) / 2 + 2;
+  return [
+    [m * 0.42, rMax],
+    [m * 0.22, m * 0.42],
+    [0, m * 0.22],
+  ][i];
+}
+
+// ── archive sets: minute hand owns the project set ──
+let sets = [];
+let setIndex = 0;
+let queue = [];
+
+function shuffled(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function loadImage(url) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = url;
+  });
+}
+
+function advanceSet() {
+  setIndex = (setIndex + 1) % sets.length;
+  queue = shuffled(sets[setIndex]);
+}
+
+async function nextImage() {
+  if (queue.length === 0) queue = shuffled(sets[setIndex]);
+  return loadImage(queue.pop());
+}
+
+// ── generative soundtrack (pad chords per minute + plucks + ticks) ──
+const master = ctx.createGain();
+master.gain.value = 1;
+master.connect(ctx.destination);
+let muted = false;
+
+const CHORDS = [
+  [110.00, 164.81, 220.60],
+  [87.31, 130.81, 174.61],
+  [130.81, 196.00, 261.63],
+  [98.00, 146.83, 196.00],
+];
+const padOscs = [];
+
+function startPad() {
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 520;
+  const padGain = ctx.createGain();
+  padGain.gain.value = 0.028;
+  lp.connect(padGain); padGain.connect(master);
+  [[110, 0.5], [164.81, 0.35], [220.6, 0.2]].forEach(([f, g]) => {
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = f;
+    const og = ctx.createGain(); og.gain.value = g;
+    o.connect(og); og.connect(lp); o.start();
+    padOscs.push(o);
+  });
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 1 / 16;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.014;
+  lfo.connect(lfoGain); lfoGain.connect(padGain.gain); lfo.start();
+}
+
+function setChordAt(when, minute) {
+  const chord = CHORDS[minute % CHORDS.length];
+  padOscs.forEach((o, i) => o.frequency.setTargetAtTime(chord[i], when, 0.8));
+}
+
+const PENTA = [220, 261.63, 293.66, 329.63, 392, 440];
+function pluckAt(when, sec, minute) {
+  const o = ctx.createOscillator();
+  o.type = 'triangle';
+  o.frequency.value = PENTA[(sec * 7 + minute * 3) % PENTA.length];
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.032, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.5);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.55);
+}
+
+let noiseBuf = null;
+function makeNoise() {
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+
+function tickAt(when) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 6500;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.02, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.025);
+  src.connect(hp); hp.connect(g); g.connect(master);
+  src.start(when);
+}
+
+let tockFlip = false;
+function tockAt(when) {
+  tockFlip = !tockFlip;
+  const o = ctx.createOscillator();
+  o.type = 'sine'; o.frequency.value = tockFlip ? 392 : 329.63;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.06, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.3);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.35);
+}
+
+function gongAt(when) {
+  [[98, 0.1, 2.0], [196, 0.04, 1.2]].forEach(([f, amp, dur]) => {
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(amp, when);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    o.connect(g); g.connect(master);
+    o.start(when); o.stop(when + dur + 0.1);
+  });
+}
+
+// ── geometry ──
+const angleOf = (units, total) => (units / total) * Math.PI * 2 - Math.PI / 2;
+
+function clipAnnulus(g, rIn, rOut) {
+  g.beginPath();
+  g.arc(W / 2, H / 2, rOut, 0, Math.PI * 2, false);
+  if (rIn > 0) g.arc(W / 2, H / 2, rIn, 0, Math.PI * 2, true);
+  g.clip('evenodd');
+}
+
+function clipSector(g, a0, a1) {
+  const R = Math.hypot(W, H);
+  g.beginPath();
+  g.moveTo(W / 2, H / 2);
+  g.arc(W / 2, H / 2, R, a0, a1, false);
+  g.closePath();
+  g.clip();
+}
+
+function hand(angle, len, w) {
+  x.save();
+  x.translate(W / 2, H / 2);
+  x.rotate(angle);
+  x.globalCompositeOperation = 'difference';
+  x.fillStyle = '#fff';
+  x.fillRect(0, -w / 2, len, w);
+  x.restore();
+}
+
+// ── render ──
+function drawFrame() {
+  const phase = conductor.phase();
+  const date = new Date(phase * 1000);
+  const intoMinute = ((phase % 60) + 60) % 60;
+  const sec = Math.floor(intoMinute);
+  const frac = intoMinute - sec;
+  const snap = 1 - Math.pow(1 - Math.min(frac / 0.15, 1), 3);
+  const steppedSec = sec + snap;
+  const handAngle = angleOf(steppedSec, 60);
+
+  const [r, g, b] = HOUR_COLORS[date.getHours()];
+  x.fillStyle = `rgb(${r * 0.12 | 0},${g * 0.12 | 0},${b * 0.12 | 0})`;
+  x.fillRect(0, 0, W, H);
+
+  // every ring reveals simultaneously: its baked collage, then the live
+  // image wiped in from its own wedge start to the shared hand
+  for (let i = 0; i < rings.length; i++) {
+    const ring = rings[i];
+    const [rIn, rOut] = ringRadii(i);
+    x.save();
+    clipAnnulus(x, rIn, rOut);
+    if (ring.baked) x.drawImage(ring.baked, 0, 0, W, H);
+    if (ring.liveImg) {
+      clipSector(x, angleOf(ring.wedgeStart, 60), handAngle);
+      drawCover(x, ring.liveImg);
+    }
+    x.restore();
+  }
+
+  // thin ring seams
+  x.save();
+  x.globalCompositeOperation = 'difference';
+  x.strokeStyle = 'rgba(255,255,255,0.5)';
+  x.lineWidth = 1;
+  [ringRadii(0)[0], ringRadii(1)[0]].forEach((rr) => {
+    x.beginPath(); x.arc(W / 2, H / 2, rr, 0, Math.PI * 2); x.stroke();
+  });
+  x.restore();
+
+  // hour-color rim arc
+  const hourPos = (date.getHours() % 12) + date.getMinutes() / 60;
+  x.save();
+  x.strokeStyle = `rgb(${r},${g},${b})`;
+  x.lineWidth = 3;
+  x.beginPath();
+  x.arc(W / 2, H / 2, Math.min(W, H) * 0.47, -Math.PI / 2, angleOf(hourPos, 12), false);
+  x.stroke();
+  x.restore();
+
+  hand(angleOf(hourPos, 12), Math.min(W, H) * 0.18, 7);
+  hand(angleOf(date.getMinutes() + sec / 60, 60), Math.min(W, H) * 0.31, 4);
+  hand(handAngle, Math.hypot(W, H), 1.5);
+
+  x.save();
+  x.globalCompositeOperation = 'difference';
+  x.fillStyle = '#fff';
+  x.beginPath(); x.arc(W / 2, H / 2, 5, 0, Math.PI * 2); x.fill();
+  x.restore();
+}
+
+function render() {
+  drawFrame();
+  requestAnimationFrame(render);
+}
+
+// ── beat wiring: rotate each ring on ITS boundary ──
+async function rotateRing(ring, i, s) {
+  const cad = TEMPI[tempo].cad[i];
+  const prevStart = ring.wedgeStart;
+  // commit the completed wedge into this ring's collage
+  if (ring.liveImg && ring.baked) {
+    const bx = ring.baked.getContext('2d');
+    bx.save();
+    clipSector(bx, angleOf(prevStart, 60), angleOf(prevStart + cad > 60 ? 60 : prevStart + cad, 60));
+    drawCover(bx, ring.liveImg);
+    bx.restore();
+  }
+  ring.wedgeStart = s;
+  ring.liveImg = await nextImage();
+}
+
+conductor.onBeat((beat) => {
+  const s = beat.date.getSeconds();
+  const when = conductor.audioTimeForWallSec(beat.wallSec + 1);
+  const nextS = (s + 1) % 60;
+  tickAt(when);
+  if (nextS % TEMPI[tempo].cad[0] === 0) tockAt(when);
+  if (nextS % 2 === 1) pluckAt(when, nextS, beat.date.getMinutes());
+  if (nextS === 0) {
+    gongAt(when);
+    setChordAt(when, beat.date.getMinutes() + 1);
+  }
+
+  if (s === 0) advanceSet();
+
+  rings.forEach((ring, i) => {
+    const cad = TEMPI[tempo].cad[i];
+    const idx = Math.floor(beat.wallSec / cad);
+    if (ring.lastIdx === -1) ring.lastIdx = idx;
+    else if (idx !== ring.lastIdx) {
+      ring.lastIdx = idx;
+      rotateRing(ring, i, Math.floor(s / cad) * cad);
+    }
+  });
+
+  statusEl.textContent = `${TEMPI[tempo].name} · SET ${String(setIndex + 1).padStart(2, '0')}\n${beat.date.toTimeString().slice(0, 8)}`;
+  if (document.hidden && entered) drawFrame();
+});
+
+// ── entry: every ring lands mid-reveal — baked image A, image B already
+//    wiping in behind the hand. Activity from the first second. ──
+let entered = false;
+const ready = loadImageryManifest();
+
+async function primeRings() {
+  const s = Math.floor(((conductor.phase() % 60) + 60) % 60);
+  for (let i = 0; i < rings.length; i++) {
+    const ring = rings[i];
+    const cad = TEMPI[tempo].cad[i];
+    ring.baked = document.createElement('canvas');
+    sizeCanvas(ring.baked);
+    drawCover(ring.baked.getContext('2d'), await nextImage());
+    ring.liveImg = await nextImage();
+    ring.wedgeStart = Math.floor(s / cad) * cad;
+    ring.lastIdx = -1;
+  }
+}
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  sizeCanvas(canvas);
+  x.setTransform(DPR, 0, 0, DPR, 0, 0);
+  rings.forEach((ring) => {
+    if (!ring.baked) return;
+    const snapshot = ring.liveImg;
+    ring.baked = document.createElement('canvas');
+    sizeCanvas(ring.baked);
+    if (snapshot) drawCover(ring.baked.getContext('2d'), snapshot);
+  });
+}
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  overlay.classList.add('leaving');
+  await conductor.start();
+  makeNoise();
+  startPad();
+  const manifest = await ready;
+  const per = Math.ceil(manifest.length / 4);
+  sets = [0, 1, 2, 3].map((i) => manifest.slice(i * per, (i + 1) * per)).filter((q) => q.length);
+  queue = shuffled(sets[0]);
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  sizeCanvas(canvas);
+  x.setTransform(DPR, 0, 0, DPR, 0, 0);
+  await primeRings();
+  requestAnimationFrame(render);
+  setTimeout(() => overlay.remove(), 600);
+});
+
+window.addEventListener('resize', () => { if (entered) resize(); });
+
+document.addEventListener('keydown', (e) => {
+  if (!entered) return;
+  if (e.key === 'm') {
+    muted = !muted;
+    master.gain.setValueAtTime(muted ? 0 : 1, ctx.currentTime);
+  }
+  if (TEMPI[e.key]) tempo = Number(e.key);
+});
+</script>
+
+</body>
+</html>

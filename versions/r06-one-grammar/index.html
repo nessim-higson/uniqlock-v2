@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNIQLOCK V2 — rhythm core</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="viewContainer" class="day top-to-bottom">
+  <div id="time1">
+    <div class="time">
+      <span class="h1">0</span><span class="h2">0</span><span class="m1">0</span><span class="m2">0</span><span class="s1">0</span><span class="s2">0</span>
+    </div>
+    <div class="timezone"></div>
+  </div>
+  <div id="time2">
+    <div class="time">
+      <span class="h1">0</span><span class="h2">0</span><span class="m1">0</span><span class="m2">0</span><span class="s1">0</span><span class="s2">0</span>
+    </div>
+    <div class="timezone"></div>
+  </div>
+  <div id="videoPlayer">
+    <video muted playsinline></video>
+    <video muted playsinline style="display:none"></video>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="wordmark">UNIQLOCK</div>
+  <div class="prompt">click to enter — sound on &nbsp;·&nbsp; m mute &nbsp;·&nbsp; d diagnostics</div>
+</div>
+
+<div id="hud"></div>
+<div id="muteHint"></div>
+
+<script>
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  document.querySelectorAll('.timezone').forEach((el) => { el.textContent = tz; });
+</script>
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module" src="js/main.js"></script>
+
+</body>
+</html>

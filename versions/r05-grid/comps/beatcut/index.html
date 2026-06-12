@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 05 — beat-cut grid</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
+
+  .panel { position: absolute; overflow: hidden; }
+  .panel img, .panel video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .panel.in-top    { animation: inTop 300ms forwards var(--ease-out); }
+  .panel.in-right  { animation: inRight 300ms forwards var(--ease-out); }
+  .panel.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
+  .panel.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
+  .panel.out-top    { animation: outTop 300ms forwards var(--ease-out); }
+  .panel.out-right  { animation: outRight 300ms forwards var(--ease-out); }
+  .panel.out-bottom { animation: outBottom 300ms forwards var(--ease-out); }
+  .panel.out-left   { animation: outLeft 300ms forwards var(--ease-out); }
+
+  @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+  @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+  @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+  @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+  @keyframes outTop    { from { clip-path: inset(0); } to { clip-path: inset(100% 0 0 0); } }
+  @keyframes outRight  { from { clip-path: inset(0); } to { clip-path: inset(0 100% 0 0); } }
+  @keyframes outBottom { from { clip-path: inset(0); } to { clip-path: inset(0 0 100% 0); } }
+  @keyframes outLeft   { from { clip-path: inset(0); } to { clip-path: inset(0 0 0 100%); } }
+
+  .clockface { width: 100%; height: 100%; display: flex; align-items: center;
+    justify-content: center; font-family: "Uniqlo", "Helvetica Neue", sans-serif;
+    font-weight: 700; }
+  .clockface .t { font-size: 14cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+  .panel { container-type: size; }
+
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<div id="stage" style="position:absolute; inset:0;"></div>
+<video id="v0" muted playsinline preload="auto" style="display:none"></video>
+<video id="v1" muted playsinline preload="auto" style="display:none"></video>
+<div id="label">COMP 05 — BEAT-CUT GRID · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">BEAT-CUT GRID</div>
+  <div class="prompt">an invisible grid; the archive arrives and leaves it in changing
+  compositions,<br>every entrance and exit on the metronome. the clock visits to
+  remind you who's conducting.</div>
+  <div class="prompt">1 / 2 / 3 — density · m mute · click to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/data.js';
+
+const stage = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const vids = [document.getElementById('v0'), document.getElementById('v1')];
+
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+const DENSITY = { 1: { mul: 2, name: 'HALF-TIME' }, 2: { mul: 1, name: 'ON THE BEAT' }, 3: { mul: 0.5, name: 'DOUBLE-TIME' } };
+let density = 2;
+
+// ── the invisible grid: 6 × 6, panels live in grid units [x, y, w, h] ──
+const GRID = 6;
+const LAYOUTS = [
+  [[0, 0, 6, 6]],
+  [[0, 0, 3, 6]],
+  [[3, 0, 3, 6]],
+  [[0, 0, 2, 6], [4, 0, 2, 6]],
+  [[0, 0, 2, 6], [2, 0, 2, 6], [4, 0, 2, 6]],
+  [[1, 1, 4, 4]],
+  [[0, 0, 4, 6], [4, 4, 2, 2]],
+  [[0, 0, 6, 3]],
+  [[0, 3, 6, 3]],
+  [[3, 0, 3, 3], [0, 3, 3, 3]],
+  [[0, 1, 2, 4], [4, 0, 2, 3]],
+  [[2, 0, 2, 6], [0, 2, 2, 2], [4, 3, 2, 3]],
+  [[4, 0, 2, 2]],
+  [[0, 4, 2, 2]],
+];
+const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
+let dirCount = 0;
+function nextDir() { return DIRECTIONS[dirCount++ % 4]; }
+
+// ── pools ──
+let stillPool = [], stillQueue = [], clipQueue = [];
+function shuffled(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+function nextStillUrl() {
+  if (!stillQueue.length) stillQueue = shuffled(stillPool);
+  return stillQueue.pop();
+}
+function nextClipUrl() {
+  if (!clipQueue.length) clipQueue = shuffled(VIDEOS[timeOfDay(new Date().getHours())]);
+  return clipQueue.pop();
+}
+
+// video claim/release — at most one clip panel on screen, one preloading
+let vidStandby = 0;
+let vidBusy = [false, false];
+function preloadStandby() {
+  if (vidBusy[vidStandby]) return;
+  const v = vids[vidStandby];
+  v.src = nextClipUrl();
+  v.load();
+}
+function claimVideo() {
+  const i = vidStandby;
+  if (vidBusy[i] || vids[i].readyState < 2) return null;
+  vidBusy[i] = true;
+  vidStandby = 1 - vidStandby;
+  preloadStandby();
+  return vids[i];
+}
+function releaseVideo(v) {
+  const i = vids.indexOf(v);
+  if (i >= 0) { v.pause(); vidBusy[i] = false; }
+}
+
+// ── panels ──
+const livePanels = new Set();
+const liveClockFaces = new Set();
+
+function panelDiv(cell) {
+  const [gx, gy, gw, gh] = cell;
+  const d = document.createElement('div');
+  d.className = 'panel';
+  d.style.left = (gx / GRID * 100) + '%';
+  d.style.top = (gy / GRID * 100) + '%';
+  d.style.width = (gw / GRID * 100) + '%';
+  d.style.height = (gh / GRID * 100) + '%';
+  return d;
+}
+
+function fillContent(d, wantClip) {
+  if (wantClip) {
+    const v = claimVideo();
+    if (v) {
+      v.style.display = 'block';
+      v.currentTime = 0;
+      v.play().catch(() => {});
+      d.appendChild(v);
+      d.dataset.video = '1';
+      return;
+    }
+  }
+  const im = document.createElement('img');
+  im.src = nextStillUrl();
+  d.appendChild(im);
+}
+
+function fillClock(d) {
+  const face = document.createElement('div');
+  face.className = 'clockface';
+  const t = document.createElement('div');
+  t.className = 't';
+  face.appendChild(t);
+  d.appendChild(face);
+  liveClockFaces.add(face);
+  paintClock(face, new Date());
+}
+
+function paintClock(face, date) {
+  const [r, g, b] = HOUR_COLORS[date.getHours()];
+  const invert = date.getSeconds() % 2 === 1;
+  face.style.background = invert ? '#fff' : `rgb(${r},${g},${b})`;
+  face.style.color = invert ? `rgb(${r},${g},${b})` : '#fff';
+  face.querySelector('.t').textContent = date.toTimeString().slice(0, 8);
+}
+
+function showPanel(spec) {
+  const d = panelDiv(spec.cell);
+  spec.el = d;
+  d.dataset.slot = spec.slot;
+  if (spec.kind === 'clock') fillClock(d);
+  else fillContent(d, spec.kind === 'clip');
+  if (spec.mode === 'wipe') d.classList.add('in-' + nextDir());
+  stage.appendChild(d);
+  livePanels.add(d);
+}
+
+// belt-and-braces: any panel surviving two slots past its own is a leak
+function sweepStale() {
+  for (const d of [...livePanels]) {
+    if (slotCount - Number(d.dataset.slot || 0) >= 2) removePanel(d);
+  }
+}
+
+function removePanel(d) {
+  if (!d) return;
+  const v = d.querySelector('video');
+  if (v) { releaseVideo(v); v.style.display = 'none'; document.body.appendChild(v); }
+  const face = d.querySelector('.clockface');
+  if (face) liveClockFaces.delete(face);
+  d.remove();
+  livePanels.delete(d);
+}
+
+function hidePanel(spec) {
+  const d = spec.el;
+  if (!d || !d.isConnected) return;
+  if (spec.mode === 'wipe') {
+    d.className = 'panel out-' + nextDir();
+    let done = false;
+    const fin = () => { if (!done) { done = true; removePanel(d); } };
+    d.addEventListener('animationend', fin, { once: true });
+    setTimeout(fin, 400);
+  } else {
+    removePanel(d);
+  }
+}
+
+// ── slot engine: phase-space event queue on the conductor ──
+let events = [];
+function at(phase, prio, fn) {
+  events.push({ phase, prio, fn });
+  events.sort((a, b) => a.phase - b.phase || a.prio - b.prio);
+}
+
+let slotCount = 0;
+let nextClockIn = 5 + Math.floor(Math.random() * 4);
+let lastLayout = -1;
+
+function pickLayout() {
+  let i;
+  do { i = Math.floor(Math.random() * LAYOUTS.length); } while (i === lastLayout);
+  lastLayout = i;
+  return LAYOUTS[i];
+}
+
+function pickDuration() {
+  const opts = [1, 1, 2, 2, 2, 3, 4];
+  return opts[Math.floor(Math.random() * opts.length)] * DENSITY[density].mul;
+}
+
+function runSlot(P) {
+  slotCount++;
+  sweepStale();
+  const isClock = --nextClockIn <= 0;
+  if (isClock) nextClockIn = 5 + Math.floor(Math.random() * 4);
+
+  const D = isClock ? 2 * DENSITY[density].mul : pickDuration();
+  const layout = isClock
+    ? (Math.random() < 0.7 ? [[0, 0, 6, 6]] : [[1, 1, 4, 4]])
+    : pickLayout();
+
+  const specs = layout.map((cell, i) => {
+    // a panel must always show strictly before it hides
+    const enter = i === 0 ? 0 : Math.min([0, 0.5, 1][Math.floor(Math.random() * 3)], Math.max(0, D - 0.5));
+    let early = (!isClock && D >= 2 && i > 0 && Math.random() < 0.25) ? 0.5 : 0;
+    if (D - early <= enter) early = 0;
+    return {
+      cell,
+      kind: isClock ? 'clock' : (i === 0 && Math.random() < 0.3 ? 'clip' : 'still'),
+      mode: Math.random() < 0.3 ? 'cut' : 'wipe',
+      enter, early,
+      slot: slotCount,
+    };
+  });
+
+  for (const spec of specs) {
+    at(P + spec.enter, 1, () => showPanel(spec));
+    at(P + D - spec.early, 0, () => hidePanel(spec));
+  }
+  at(P + D, 2, () => runSlot(P + D));
+}
+
+function processEvents(p) {
+  while (events.length && p >= events[0].phase) {
+    const e = events.shift();
+    // after a background-tab sleep, drop stale cosmetic events but keep
+    // the slot chain alive
+    if (p - e.phase > 2 && e.prio !== 2) continue;
+    e.fn();
+  }
+}
+
+function render() {
+  processEvents(conductor.phase());
+  requestAnimationFrame(render);
+}
+
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  // rAF freezes in hidden tabs — the beat keeps the composition engine alive
+  if (document.hidden && entered) processEvents(conductor.phase());
+  for (const face of liveClockFaces) paintClock(face, beat.date);
+  statusEl.textContent = `${DENSITY[density].name} · SLOT ${String(slotCount).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+// ── entry ──
+let entered = false;
+const ready = Promise.all([music.load(), loadImageryManifest()]);
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  overlay.classList.add('leaving');
+  await conductor.start();
+  const [, manifest] = await ready;
+  stillPool = manifest;
+  music.begin();
+  preloadStandby();
+  runSlot(Math.ceil(conductor.phase() + 0.3));
+  requestAnimationFrame(render);
+  setTimeout(() => overlay.remove(), 600);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!entered) return;
+  if (e.key === 'm') music.toggleMute();
+  if (DENSITY[e.key]) density = Number(e.key);
+});
+</script>
+
+</body>
+</html>
