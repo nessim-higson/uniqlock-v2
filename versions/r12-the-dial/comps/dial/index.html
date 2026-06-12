@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 11 — the dial</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  canvas#bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #scrim { position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.5) 100%); }
+  #ring { position: absolute; inset: 0; pointer-events: none; }
+  .thumb { position: absolute; width: var(--ts); height: var(--ts);
+    object-fit: cover; transform: translate(-50%, -50%);
+    outline: 1px solid rgba(255,255,255,0.25);
+    transition: transform 200ms cubic-bezier(.1, 1, .2, 1), outline-color 200ms; }
+  .thumb.on { transform: translate(-50%, -50%) scale(1.18); outline: 2px solid #fff; z-index: 2; }
+  canvas#hands { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<div id="scrim"></div>
+<div id="ring"></div>
+<canvas id="hands"></canvas>
+<div id="label">COMP 11 — THE DIAL · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">THE DIAL</div>
+  <div class="prompt">twenty works ring the clock face. the second hand strikes one every
+  three seconds<br>and it floods the background through the displacement shader.
+  every minute, a new ring.<br>same minute, same dial, for everyone.</div>
+  <div class="prompt">m mute · click to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import * as THREE from 'three';
+import { createConductor } from '../../js/conductor.js';
+import { HOUR_COLORS, loadImageryManifest } from '../../js/data.js';
+
+const overlay = document.getElementById('overlay');
+const statusEl = document.getElementById('status');
+const ringEl = document.getElementById('ring');
+const handsCanvas = document.getElementById('hands');
+const hx = handsCanvas.getContext('2d');
+
+const conductor = createConductor();
+const { ctx } = conductor;
+
+// ═══ the dial: 20 segments of 3 seconds. segment serial S is a pure
+// function of the clock; its image floods the background when the hand
+// strikes its thumb. minute serial picks the ring. broadcast, as always. ═══
+const SEGS = 20;
+const SEG_SEC = 3;
+const MORPH = 0.7;
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+let manifest = [];
+const ringCache = new Map(); // minuteSerial -> [20 urls]
+function ringFor(minuteSerial) {
+  if (ringCache.has(minuteSerial)) return ringCache.get(minuteSerial);
+  const rng = mulberry32((minuteSerial * 2654435761) >>> 0);
+  const list = [];
+  const used = new Set();
+  while (list.length < SEGS) {
+    let i = Math.floor(rng() * manifest.length);
+    while (used.has(i)) i = (i + 1) % manifest.length;
+    used.add(i);
+    list.push(manifest[i]);
+  }
+  if (ringCache.size > 4) ringCache.delete(ringCache.keys().next().value);
+  ringCache.set(minuteSerial, list);
+  return list;
+}
+function urlForSegment(S) {
+  const minuteSerial = Math.floor((S * SEG_SEC) / 60);
+  return ringFor(minuteSerial)[((S % SEGS) + SEGS) % SEGS];
+}
+
+// ── background: fullscreen displacement morph (the shader effect) ──
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('bg'), antialias: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+camera.position.z = 1;
+
+const mat = new THREE.ShaderMaterial({
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `
+    varying vec2 vUv;
+    uniform sampler2D tA; uniform sampler2D tB;
+    uniform float prog; uniform float zoom;
+    uniform vec2 sA; uniform vec2 oA; uniform vec2 sB; uniform vec2 oB;
+    void main() {
+      vec2 z = (vUv - 0.5) / zoom + 0.5;
+      vec2 ua = z * sA + oA;
+      vec2 ub = z * sB + oB;
+      vec4 a0 = texture2D(tA, ua);
+      vec2 dv = (a0.rg - 0.5) * 0.4;
+      float p = smoothstep(0.0, 1.0, prog);
+      vec4 ca = texture2D(tA, ua + dv * p);
+      vec4 cb = texture2D(tB, ub - dv * (1.0 - p));
+      float m = smoothstep(0.1, 0.9, p + (a0.r - 0.5) * 0.3);
+      gl_FragColor = mix(ca, cb, m);
+    }`,
+  uniforms: {
+    tA: { value: null }, tB: { value: null },
+    prog: { value: 1 }, zoom: { value: 1 },
+    sA: { value: new THREE.Vector2(1, 1) }, oA: { value: new THREE.Vector2(0, 0) },
+    sB: { value: new THREE.Vector2(1, 1) }, oB: { value: new THREE.Vector2(0, 0) },
+  },
+});
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+
+const loader = new THREE.TextureLoader();
+const texCache = new Map();
+function ensureTex(url) {
+  if (texCache.has(url)) return texCache.get(url);
+  const entry = { tex: null, w: 1, h: 1, ready: false };
+  loader.load(url, (t) => {
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    entry.tex = t; entry.w = t.image.width; entry.h = t.image.height; entry.ready = true;
+  });
+  texCache.set(url, entry);
+  if (texCache.size > 28) {
+    const k = texCache.keys().next().value;
+    const e = texCache.get(k);
+    if (e.tex) e.tex.dispose();
+    texCache.delete(k);
+  }
+  return entry;
+}
+function coverUniforms(entry, sV, oV) {
+  const s = Math.max(innerWidth / entry.w, innerHeight / entry.h);
+  const sx = innerWidth / (entry.w * s), sy = innerHeight / (entry.h * s);
+  sV.set(sx, sy); oV.set((1 - sx) / 2, (1 - sy) / 2);
+}
+
+// ── the ring (DOM thumbs) ──
+let thumbs = [];
+let ringMinute = -1;
+function buildRing() {
+  ringEl.innerHTML = '';
+  thumbs = [];
+  const m = Math.min(innerWidth, innerHeight);
+  const ts = m * 0.105;
+  ringEl.style.setProperty('--ts', ts + 'px');
+  const R = m * 0.37;
+  for (let k = 0; k < SEGS; k++) {
+    const a = (k / SEGS) * Math.PI * 2 - Math.PI / 2;
+    const img = document.createElement('img');
+    img.className = 'thumb';
+    img.style.left = (innerWidth / 2 + Math.cos(a) * R) + 'px';
+    img.style.top = (innerHeight / 2 + Math.sin(a) * R) + 'px';
+    ringEl.appendChild(img);
+    thumbs.push(img);
+  }
+}
+function dressRing(minuteSerial) {
+  const list = ringFor(minuteSerial);
+  thumbs.forEach((img, k) => { img.src = list[k]; });
+  ringMinute = minuteSerial;
+}
+
+// ── hands (canvas overlay, difference blend) ──
+function drawHands() {
+  const W = innerWidth, H = innerHeight;
+  if (handsCanvas.width !== W * devicePixelRatio) {
+    handsCanvas.width = W * devicePixelRatio;
+    handsCanvas.height = H * devicePixelRatio;
+  }
+  hx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  hx.clearRect(0, 0, W, H);
+  const phase = conductor.phase();
+  const date = new Date(phase * 1000);
+  const intoMin = ((phase % 60) + 60) % 60;
+  const sec = Math.floor(intoMin);
+  const frac = intoMin - sec;
+  const snap = 1 - Math.pow(1 - Math.min(frac / 0.15, 1), 3);
+  const angle = (units, total) => (units / total) * Math.PI * 2 - Math.PI / 2;
+  const m = Math.min(W, H);
+
+  hx.save();
+  hx.globalCompositeOperation = 'difference';
+  hx.fillStyle = '#fff';
+  const hand = (a, len, w) => {
+    hx.save();
+    hx.translate(W / 2, H / 2);
+    hx.rotate(a);
+    hx.fillRect(0, -w / 2, len, w);
+    hx.restore();
+  };
+  const hourPos = (date.getHours() % 12) + date.getMinutes() / 60;
+  hand(angle(hourPos, 12), m * 0.16, 6);
+  hand(angle(date.getMinutes() + sec / 60, 60), m * 0.26, 3.5);
+  hand(angle(sec + snap, 60), Math.hypot(W, H) / 2, 1.5);
+  hx.beginPath(); hx.arc(W / 2, H / 2, 4.5, 0, Math.PI * 2); hx.fill();
+  hx.restore();
+}
+
+// ── generative soundtrack (the radial piece's own engine) ──
+const master = ctx.createGain();
+master.connect(ctx.destination);
+let muted = false;
+const CHORDS = [
+  [110.00, 164.81, 220.60], [87.31, 130.81, 174.61],
+  [130.81, 196.00, 261.63], [98.00, 146.83, 196.00],
+];
+const padOscs = [];
+function startPad() {
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 520;
+  const padGain = ctx.createGain();
+  padGain.gain.value = 0.028;
+  lp.connect(padGain); padGain.connect(master);
+  [[110, 0.5], [164.81, 0.35], [220.6, 0.2]].forEach(([f, g]) => {
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = f;
+    const og = ctx.createGain(); og.gain.value = g;
+    o.connect(og); og.connect(lp); o.start();
+    padOscs.push(o);
+  });
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 1 / 16;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = 0.014;
+  lfo.connect(lfoGain); lfoGain.connect(padGain.gain); lfo.start();
+}
+function setChordAt(when, minute) {
+  const chord = CHORDS[minute % CHORDS.length];
+  padOscs.forEach((o, i) => o.frequency.setTargetAtTime(chord[i], when, 0.8));
+}
+const PENTA = [220, 261.63, 293.66, 329.63, 392, 440];
+function pluckAt(when, sec, minute) {
+  const o = ctx.createOscillator();
+  o.type = 'triangle';
+  o.frequency.value = PENTA[(sec * 7 + minute * 3) % PENTA.length];
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.03, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.5);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.55);
+}
+let noiseBuf = null;
+function makeNoise() {
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
+  const d = noiseBuf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+function tickAt(when) {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 6500;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.02, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.025);
+  src.connect(hp); hp.connect(g); g.connect(master);
+  src.start(when);
+}
+let tockFlip = false;
+function tockAt(when) {
+  tockFlip = !tockFlip;
+  const o = ctx.createOscillator();
+  o.type = 'sine'; o.frequency.value = tockFlip ? 392 : 329.63;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.06, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.3);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.35);
+}
+function gongAt(when) {
+  [[98, 0.1, 2.0], [196, 0.04, 1.2]].forEach(([f, amp, dur]) => {
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(amp, when);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    o.connect(g); g.connect(master);
+    o.start(when); o.stop(when + dur + 0.1);
+  });
+}
+
+// ── render: background is a pure function of the clock ──
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  buildRing();
+  if (ringMinute >= 0) dressRing(ringMinute);
+}
+addEventListener('resize', () => { if (entered) resize(); });
+
+function renderFrame() {
+  const phase = conductor.phase();
+  const S = Math.floor(phase / SEG_SEC);
+  const tIn = phase - S * SEG_SEC;
+
+  const eA = ensureTex(urlForSegment(S - 1));
+  const eB = ensureTex(urlForSegment(S));
+  ensureTex(urlForSegment(S + 1));
+  ensureTex(urlForSegment(S + 2));
+
+  if (eA.ready && eB.ready) {
+    mat.uniforms.tA.value = eA.tex;
+    mat.uniforms.tB.value = eB.tex;
+    coverUniforms(eA, mat.uniforms.sA.value, mat.uniforms.oA.value);
+    coverUniforms(eB, mat.uniforms.sB.value, mat.uniforms.oB.value);
+    mat.uniforms.prog.value = tIn < MORPH ? tIn / MORPH : 1;
+    // slow push-in over the hold — the background breathes
+    mat.uniforms.zoom.value = 1 + (tIn / SEG_SEC) * 0.035;
+  }
+  renderer.render(scene, camera);
+  drawHands();
+}
+function render() {
+  renderFrame();
+  requestAnimationFrame(render);
+}
+
+// ── beats: ring upkeep, active thumb, audio ──
+conductor.onBeat((beat) => {
+  const s = beat.date.getSeconds();
+  const when = conductor.audioTimeForWallSec(beat.wallSec + 1);
+  const nextS = (s + 1) % 60;
+  tickAt(when);
+  if (nextS % SEG_SEC === 0) tockAt(when);
+  if (nextS % 2 === 1) pluckAt(when, nextS, beat.date.getMinutes());
+  if (nextS === 0) {
+    gongAt(when);
+    setChordAt(when, beat.date.getMinutes() + 1);
+  }
+
+  const minuteSerial = Math.floor(beat.wallSec / 60);
+  if (minuteSerial !== ringMinute && manifest.length) dressRing(minuteSerial);
+  // warm next minute's ring late in this one
+  if (s >= 52 && manifest.length) {
+    ringFor(minuteSerial + 1).forEach((u) => ensureTex(u));
+  }
+
+  const k = Math.floor(s / SEG_SEC);
+  thumbs.forEach((t, i) => t.classList.toggle('on', i === k));
+
+  if (entered) renderFrame(); // occlusion-proof
+  statusEl.textContent = `LIVE · RING ${minuteSerial % 10000} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+// ── entry ──
+let entered = false;
+const manifestReady = loadImageryManifest();
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    manifest = await manifestReady;
+    makeNoise();
+    startPad();
+    setChordAt(ctx.currentTime, new Date().getMinutes());
+    resize();
+    dressRing(Math.floor(conductor.phase() / 60));
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    requestAnimationFrame(render);
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) {
+    muted = !muted;
+    master.gain.setValueAtTime(muted ? 0 : 1, ctx.currentTime);
+  }
+});
+</script>
+
+</body>
+</html>
