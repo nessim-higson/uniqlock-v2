@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 01 — sweep reveal</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #clock { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="label">COMP 01 — SWEEP REVEAL · <a href="../">back</a></div>
+<div id="clock"></div>
+<div id="overlay">
+  <div class="wordmark">SWEEP REVEAL</div>
+  <div class="prompt">the second hand wipes the next image into existence — one revolution per minute</div>
+  <div class="prompt">click to enter — sound on · m mute</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { loadImageryManifest } from '../../js/data.js';
+
+const canvas = document.getElementById('c');
+const x = canvas.getContext('2d');
+const clockEl = document.getElementById('clock');
+const overlay = document.getElementById('overlay');
+
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+let W, H, DPR;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  x.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── image pool ──
+let pool = [];
+let current = null;
+let next = null;
+
+function shuffled(list) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function loadImage(url) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = url;
+  });
+}
+
+let queue = [];
+async function nextImage() {
+  if (queue.length === 0) queue = shuffled(pool);
+  return loadImage(queue.pop());
+}
+
+function drawCover(img) {
+  const s = Math.max(W / img.width, H / img.height);
+  const w = img.width * s, h = img.height * s;
+  x.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+}
+
+// ── render loop ──
+// One revolution per minute. The hand starts at 12 o'clock on :00; the
+// sector behind it shows the incoming image. On the minute boundary the
+// reveal completes and the next image becomes current.
+let minuteShown = -1;
+
+function render() {
+  const phase = conductor.phase();                 // continuous wall seconds
+  const intoMinute = ((phase % 60) + 60) % 60;
+  const minute = Math.floor(phase / 60);
+
+  // stepped hand: it sits, then snaps to the next second (~150ms ease) —
+  // discrete movement, like a real second hand
+  const sec = Math.floor(intoMinute);
+  const frac = intoMinute - sec;
+  const snap = 1 - Math.pow(1 - Math.min(frac / 0.15, 1), 3);
+  const steppedSec = sec + snap;
+
+  if (minute !== minuteShown && next) {
+    minuteShown = minute;
+    current = next;
+    next = null;
+    nextImage().then((img) => { next = img; });
+  }
+
+  x.fillStyle = '#000';
+  x.fillRect(0, 0, W, H);
+  if (current) drawCover(current);
+
+  const angle = (steppedSec / 60) * Math.PI * 2 - Math.PI / 2;
+  const R = Math.hypot(W, H);
+  const cx = W / 2, cy = H / 2;
+
+  if (next) {
+    x.save();
+    x.beginPath();
+    x.moveTo(cx, cy);
+    x.arc(cx, cy, R, -Math.PI / 2, angle, false);
+    x.closePath();
+    x.clip();
+    drawCover(next);
+    x.restore();
+  }
+
+  // the hand: a constant thin line — no pulse, the step IS the rhythm
+  x.save();
+  x.translate(cx, cy);
+  x.rotate(angle);
+  x.fillStyle = '#fff';
+  x.fillRect(0, -0.75, R, 1.5);
+  x.globalAlpha = 0.22;
+  x.fillRect(0, -3, R, 6);
+  x.restore();
+
+  requestAnimationFrame(render);
+}
+
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  clockEl.textContent = beat.date.toTimeString().slice(0, 8);
+});
+
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    pool = await manifestReady;
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    current = await nextImage();
+    next = await nextImage();
+    minuteShown = Math.floor(conductor.phase() / 60);
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch((err) => {
+      console.warn('[sweep] music failed, running silent:', err);
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) music.toggleMute();
+});
+</script>
+
+</body>
+</html>
