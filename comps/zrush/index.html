@@ -58,7 +58,7 @@ camera.position.z = 0;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
-scene.fog = new THREE.Fog(0x000000, 18, 70);
+scene.fog = new THREE.Fog(0x000000, 24, 85);
 
 let rt = new THREE.WebGLRenderTarget(VW * renderer.getPixelRatio(), VH * renderer.getPixelRatio());
 
@@ -94,7 +94,7 @@ const lensMat = new THREE.ShaderMaterial({
     tex1: { value: rt.texture },
     textureScale: { value: 0.4 },
     time: { value: 0 },
-    displacement: { value: 0.55 },
+    displacement: { value: 0.26 },
     scrollDif: { value: 0 },
   },
 });
@@ -111,8 +111,8 @@ window.addEventListener('resize', resize);
 resize();
 
 // ── the rushing archive ──
-const PLANES = 14;
-const SPACING = 5;
+const PLANES = 12;
+const SPACING = 6.5;
 const loader = new THREE.TextureLoader();
 let pool = [];
 let queue = [];
@@ -135,7 +135,7 @@ function assignTexture(slide) {
   loader.load(nextUrl(), (tex) => {
     tex.colorSpace = THREE.SRGBColorSpace;
     const a = tex.image.width / tex.image.height;
-    slide.mesh.scale.set(a >= 1 ? 6 * a : 6, a >= 1 ? 6 : 6 / a, 1);
+    slide.mesh.scale.set(a >= 1 ? 7.5 * a : 7.5, a >= 1 ? 7.5 : 7.5 / a, 1);
     slide.mat.map = tex;
     slide.mat.needsUpdate = true;
   });
@@ -146,10 +146,12 @@ function buildSlides() {
   for (let i = 0; i < PLANES; i++) {
     const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: true });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat);
+    // center-weighted: the work parades through the middle of the frame,
+    // alternating gently off-axis so planes never fully eclipse each other
     const lane = i % 4;
     mesh.position.set(
-      [-3.4, 3.4, -1.6, 1.6][lane] * (0.8 + Math.random() * 0.5),
-      [1.4, -1.4, -2.2, 2.2][lane] * (0.6 + Math.random() * 0.6),
+      [-1.7, 1.7, -0.7, 0.7][lane] * (0.85 + Math.random() * 0.3),
+      [0.6, -0.6, -1.1, 1.1][lane] * (0.6 + Math.random() * 0.5),
       -8 - i * SPACING
     );
     scene.add(mesh);
@@ -168,8 +170,8 @@ function render(t) {
   const dt = Math.min((t - lastT) / 1000, 0.1);
   lastT = t;
 
-  impulse *= Math.pow(0.18, dt);            // sharp attack, musical decay
-  speed = 1.6 + impulse * 9;
+  impulse *= Math.pow(0.4, dt);             // softer attack, longer decay
+  speed = 0.85 + impulse * 2.4;
 
   for (const s of slides) {
     s.mesh.position.z += speed * dt;
@@ -180,7 +182,7 @@ function render(t) {
   }
 
   lensMat.uniforms.time.value = t;
-  lensMat.uniforms.scrollDif.value = impulse * 2.2;
+  lensMat.uniforms.scrollDif.value = impulse * 0.7;
 
   renderer.setRenderTarget(rt);
   renderer.render(scene, camera);
