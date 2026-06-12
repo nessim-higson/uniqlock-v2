@@ -1,0 +1,238 @@
+/* Faithful port of the Uniqlock Rewind wipe system (style.css), trimmed to
+   the Phase 1 rhythm core. Easing + durations are canonical. */
+
+@font-face {
+  font-family: "Uniqlo";
+  src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+  font-weight: 700;
+}
+@font-face {
+  font-family: "Uniqlo";
+  src: url("https://megajerk.github.io/Uniqlock/assets/fonts/27_UniqloRegular.woff") format("woff");
+  font-weight: 400;
+}
+
+:root {
+  --ease-out: cubic-bezier(.1, 1, .2, 1);
+  --color_1: rgb(125, 0, 34); /* hour color, set by JS */
+  --color_2: #fff;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: "Uniqlo", "Helvetica Neue", Helvetica, sans-serif;
+}
+
+#viewContainer {
+  position: absolute;
+  inset: 0;
+}
+
+#time1, #time2, #videoPlayer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+#time1 {
+  color: var(--color_1);
+  background-color: var(--color_2);
+}
+#time2 {
+  color: var(--color_2);
+  background-color: var(--color_1);
+}
+
+.time {
+  display: flex;
+  font-size: 16vmin;
+  font-weight: 700;
+  line-height: 1;
+}
+.time span {
+  width: 0.62em;
+  text-align: center;
+}
+.time .m1, .time .s1 { margin-left: 0.35em; }
+
+.timezone {
+  margin-top: 2.2vmin;
+  font-size: 2.4vmin;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+}
+
+/* ── Clock wipe: one animation per beat on #time2; the direction class on
+   #viewContainer changes every tick, restarting the animation. Suppressed
+   while the video player is held on (canonical Rewind selector). ── */
+
+#viewContainer:has(#videoPlayer:not(.on:not(.show))).top-to-bottom #time2 {
+  animation: animateTopToBottom 300ms forwards var(--ease-out);
+}
+#viewContainer:has(#videoPlayer:not(.on:not(.show))).right-to-left #time2 {
+  animation: animateRightToLeft 300ms forwards var(--ease-out);
+}
+#viewContainer:has(#videoPlayer:not(.on:not(.show))).bottom-to-top #time2 {
+  animation: animateBottomToTop 300ms forwards var(--ease-out);
+}
+#viewContainer:has(#videoPlayer:not(.on:not(.show))).left-to-right #time2 {
+  animation: animateLeftToRight 300ms forwards var(--ease-out);
+}
+
+@keyframes animateTopToBottom {
+  from { clip-path: inset(0% 0% 0% 0%); }
+  to   { clip-path: inset(100% 0% 0% 0%); }
+}
+@keyframes animateRightToLeft {
+  from { clip-path: inset(0% 0% 0% 100%); }
+  to   { clip-path: inset(0% 0% 0% 0%); }
+}
+@keyframes animateBottomToTop {
+  from { clip-path: inset(0% 0% 0% 0%); }
+  to   { clip-path: inset(0% 0% 100% 0%); }
+}
+@keyframes animateLeftToRight {
+  from { clip-path: inset(0% 100% 0% 0%); }
+  to   { clip-path: inset(0% 0% 0% 0%); }
+}
+
+/* ── Video player: hidden by default, .show wipes in (300ms, direction
+   inherited), .on holds visible, .hide wipes out. ── */
+
+#videoPlayer {
+  clip-path: inset(100%);
+  background: #000;
+}
+#videoPlayer video {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+#videoPlayer.on { clip-path: inset(0%); }
+
+#viewContainer.top-to-bottom #videoPlayer.show {
+  animation: animateVidTopToBottomShow 300ms forwards var(--ease-out);
+}
+#viewContainer.right-to-left #videoPlayer.show {
+  animation: animateVidRightToLeftShow 300ms forwards var(--ease-out);
+}
+#viewContainer.bottom-to-top #videoPlayer.show {
+  animation: animateVidBottomToTopShow 300ms forwards var(--ease-out);
+}
+#viewContainer.left-to-right #videoPlayer.show {
+  animation: animateVidLeftToRightShow 300ms forwards var(--ease-out);
+}
+
+@keyframes animateVidTopToBottomShow {
+  from { clip-path: inset(0% 0% 100% 0%); }
+  to   { clip-path: inset(0% 0% 0% 0%); }
+}
+@keyframes animateVidRightToLeftShow {
+  from { clip-path: inset(0% 0% 0% 100%); }
+  to   { clip-path: inset(0% 0% 0% 0%); }
+}
+@keyframes animateVidBottomToTopShow {
+  from { clip-path: inset(100% 0% 0% 0%); }
+  to   { clip-path: inset(0% 0% 0% 0%); }
+}
+@keyframes animateVidLeftToRightShow {
+  from { clip-path: inset(0% 100% 0% 0%); }
+  to   { clip-path: inset(0% 0% 0% 0%); }
+}
+
+#viewContainer.top-to-bottom #videoPlayer.hide {
+  animation: animateVidTopToBottomHide 300ms forwards var(--ease-out);
+}
+#viewContainer.right-to-left #videoPlayer.hide {
+  animation: animateVidRightToLeftHide 300ms forwards var(--ease-out);
+}
+#viewContainer.bottom-to-top #videoPlayer.hide {
+  animation: animateVidBottomToTopHide 300ms forwards var(--ease-out);
+}
+#viewContainer.left-to-right #videoPlayer.hide {
+  animation: animateVidLeftToRightHide 300ms forwards var(--ease-out);
+}
+
+@keyframes animateVidTopToBottomHide {
+  from { clip-path: inset(0% 0% 0% 0%); }
+  to   { clip-path: inset(100% 0% 0% 0%); }
+}
+@keyframes animateVidRightToLeftHide {
+  from { clip-path: inset(0% 0% 0% 0%); }
+  to   { clip-path: inset(0% 100% 0% 0%); }
+}
+@keyframes animateVidBottomToTopHide {
+  from { clip-path: inset(0% 0% 0% 0%); }
+  to   { clip-path: inset(0% 0% 100% 0%); }
+}
+@keyframes animateVidLeftToRightHide {
+  from { clip-path: inset(0% 0% 0% 0%); }
+  to   { clip-path: inset(0% 0% 0% 100%); }
+}
+
+/* ── Entry overlay ── */
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3vmin;
+  background: #000;
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 500ms ease;
+}
+#overlay.leaving { opacity: 0; pointer-events: none; }
+#overlay .wordmark {
+  font-size: 6vmin;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+#overlay .prompt {
+  font-size: 2vmin;
+  font-weight: 400;
+  opacity: 0.6;
+  letter-spacing: 0.1em;
+}
+
+/* ── Instrumentation ── */
+
+#hud {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 20;
+  display: none;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.8);
+  color: #0f0;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre;
+  pointer-events: none;
+}
+
+#muteHint {
+  position: fixed;
+  bottom: 12px;
+  right: 14px;
+  z-index: 20;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  font-family: ui-monospace, Menlo, monospace;
+  pointer-events: none;
+  mix-blend-mode: difference;
+}

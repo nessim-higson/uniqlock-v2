@@ -1,0 +1,35 @@
+// Canonical data extracted from the Uniqlock Rewind source
+// (megajerk.github.io/Uniqlock, js/modules/defaultData.js).
+
+export const ASSETS = 'https://megajerk.github.io/Uniqlock/assets';
+
+// colorBySeason["1"] — 24 hour colors, index = hour of day
+export const HOUR_COLORS = [
+  [125, 0, 34], [23, 23, 156], [190, 27, 190], [19, 206, 164],
+  [129, 81, 28], [42, 126, 0], [82, 207, 226], [255, 153, 0],
+  [107, 0, 189], [255, 90, 0], [146, 6, 131], [153, 216, 19],
+  [228, 0, 127], [255, 187, 0], [0, 115, 109], [0, 160, 233],
+  [241, 145, 73], [138, 128, 0], [238, 120, 212], [127, 229, 107],
+  [96, 35, 61], [29, 69, 162], [106, 57, 5], [231, 63, 178],
+];
+
+// Season 1 is day-only; night clips/music come from Season 2,
+// exactly as the Rewind merges its pools.
+const seq = (n) => Array.from({ length: n }, (_, i) => String(i + 1).padStart(2, '0'));
+
+export const VIDEOS = {
+  day: seq(56).map((n) => `${ASSETS}/videos/Season 1/Season 1 - Day - ${n}.webm`),
+  night: seq(42).map((n) => `${ASSETS}/videos/Season 2/Season 2 - Night - ${n}.webm`),
+};
+
+export const MUSIC = {
+  day: ['00 - Season 1.ogg', '01 - Season 1.ogg', '02 - Season 1.ogg']
+    .map((f) => `${ASSETS}/music/${f}`),
+  night: [`${ASSETS}/music/Night - 01 - Season 2.ogg`],
+};
+
+// Rewind default custom config: night 21:00–06:00 (midnight folded into night
+// for the Phase 1 rhythm core), day 06:00–21:00.
+export function timeOfDay(hours) {
+  return (hours >= 21 || hours < 6) ? 'night' : 'day';
+}
