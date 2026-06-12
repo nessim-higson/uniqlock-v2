@@ -3,13 +3,45 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>COMP 05 — beat-cut</title>
+<title>COMP 05 — beat-cut grid</title>
 <style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
     font-family: "Helvetica Neue", Helvetica, sans-serif; }
-  img, video { position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; display: none; }
+  :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
+
+  .panel { position: absolute; overflow: hidden; }
+  .panel img, .panel video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .panel.in-top    { animation: inTop 300ms forwards var(--ease-out); }
+  .panel.in-right  { animation: inRight 300ms forwards var(--ease-out); }
+  .panel.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
+  .panel.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
+  .panel.out-top    { animation: outTop 300ms forwards var(--ease-out); }
+  .panel.out-right  { animation: outRight 300ms forwards var(--ease-out); }
+  .panel.out-bottom { animation: outBottom 300ms forwards var(--ease-out); }
+  .panel.out-left   { animation: outLeft 300ms forwards var(--ease-out); }
+
+  @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+  @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+  @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+  @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+  @keyframes outTop    { from { clip-path: inset(0); } to { clip-path: inset(100% 0 0 0); } }
+  @keyframes outRight  { from { clip-path: inset(0); } to { clip-path: inset(0 100% 0 0); } }
+  @keyframes outBottom { from { clip-path: inset(0); } to { clip-path: inset(0 0 100% 0); } }
+  @keyframes outLeft   { from { clip-path: inset(0); } to { clip-path: inset(0 0 0 100%); } }
+
+  .clockface { width: 100%; height: 100%; display: flex; align-items: center;
+    justify-content: center; font-family: "Uniqlo", "Helvetica Neue", sans-serif;
+    font-weight: 700; }
+  .clockface .t { font-size: 14cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+  .panel { container-type: size; }
+
   #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
     background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
@@ -26,26 +58,27 @@
 </head>
 <body>
 
-<img id="i0" alt=""><img id="i1" alt="">
-<video id="v0" muted playsinline preload="auto"></video>
-<video id="v1" muted playsinline preload="auto"></video>
-<div id="label">COMP 05 — BEAT-CUT · <a href="../">back</a></div>
+<div id="stage" style="position:absolute; inset:0;"></div>
+<video id="v0" muted playsinline preload="auto" style="display:none"></video>
+<video id="v1" muted playsinline preload="auto" style="display:none"></video>
+<div id="label">COMP 05 — BEAT-CUT GRID · <a href="../">back</a></div>
 <div id="status"></div>
 <div id="overlay">
-  <div class="wordmark">BEAT-CUT</div>
-  <div class="prompt">the archive channel-surfs itself — stills hold for a beat or two,<br>
-  dancers interrupt, every cut lands on the clock. scored by the UNIQLOCK track.</div>
-  <div class="prompt">1 / 2 / 3 — cut density · m mute · click to enter, sound on</div>
+  <div class="wordmark">BEAT-CUT GRID</div>
+  <div class="prompt">an invisible grid; the archive arrives and leaves it in changing
+  compositions,<br>every entrance and exit on the metronome. the clock visits to
+  remind you who's conducting.</div>
+  <div class="prompt">1 / 2 / 3 — density · m mute · click to enter, sound on</div>
 </div>
 
 <script type="module">
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
-import { VIDEOS, timeOfDay, loadImageryManifest } from '../../js/data.js';
+import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/data.js';
 
-const overlay = document.getElementById('overlay');
+const stage = document.getElementById('stage');
 const statusEl = document.getElementById('status');
-const imgs = [document.getElementById('i0'), document.getElementById('i1')];
+const overlay = document.getElementById('overlay');
 const vids = [document.getElementById('v0'), document.getElementById('v1')];
 
 const conductor = createConductor();
@@ -54,11 +87,30 @@ const music = createMusic(conductor);
 const DENSITY = { 1: { mul: 2, name: 'HALF-TIME' }, 2: { mul: 1, name: 'ON THE BEAT' }, 3: { mul: 0.5, name: 'DOUBLE-TIME' } };
 let density = 2;
 
-// ── pools ──
-let stillPool = [];
-let stillQueue = [];
-let clipQueue = [];
+// ── the invisible grid: 6 × 6, panels live in grid units [x, y, w, h] ──
+const GRID = 6;
+const LAYOUTS = [
+  [[0, 0, 6, 6]],
+  [[0, 0, 3, 6]],
+  [[3, 0, 3, 6]],
+  [[0, 0, 2, 6], [4, 0, 2, 6]],
+  [[0, 0, 2, 6], [2, 0, 2, 6], [4, 0, 2, 6]],
+  [[1, 1, 4, 4]],
+  [[0, 0, 4, 6], [4, 4, 2, 2]],
+  [[0, 0, 6, 3]],
+  [[0, 3, 6, 3]],
+  [[3, 0, 3, 3], [0, 3, 3, 3]],
+  [[0, 1, 2, 4], [4, 0, 2, 3]],
+  [[2, 0, 2, 6], [0, 2, 2, 2], [4, 3, 2, 3]],
+  [[4, 0, 2, 2]],
+  [[0, 4, 2, 2]],
+];
+const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
+let dirCount = 0;
+function nextDir() { return DIRECTIONS[dirCount++ % 4]; }
 
+// ── pools ──
+let stillPool = [], stillQueue = [], clipQueue = [];
 function shuffled(list) {
   const a = [...list];
   for (let i = a.length - 1; i > 0; i--) {
@@ -67,104 +119,206 @@ function shuffled(list) {
   }
   return a;
 }
-
 function nextStillUrl() {
-  if (stillQueue.length === 0) stillQueue = shuffled(stillPool);
+  if (!stillQueue.length) stillQueue = shuffled(stillPool);
   return stillQueue.pop();
 }
-
 function nextClipUrl() {
-  if (clipQueue.length === 0) clipQueue = shuffled(VIDEOS[timeOfDay(new Date().getHours())]);
+  if (!clipQueue.length) clipQueue = shuffled(VIDEOS[timeOfDay(new Date().getHours())]);
   return clipQueue.pop();
 }
 
-// ── slot rhythm: stills hold 1–2 beats with the occasional half-beat
-//    stutter pair; dance clips interrupt for 3–4 beats ──
-const slotQueue = [];
-function refillSlots() {
-  const r = Math.random();
-  if (r < 0.16) slotQueue.push({ t: 'still', b: 0.5 }, { t: 'still', b: 0.5 });
-  else if (r < 0.5) slotQueue.push({ t: 'still', b: 1 });
-  else if (r < 0.68) slotQueue.push({ t: 'still', b: 2 });
-  else if (r < 0.88) slotQueue.push({ t: 'clip', b: 3 });
-  else slotQueue.push({ t: 'clip', b: 4 });
-}
-function nextSlot() {
-  if (slotQueue.length === 0) refillSlots();
-  return slotQueue.shift();
-}
-
-// ── prepare → cut machinery (always one asset staged ahead) ──
-let imgStandby = 0;
+// video claim/release — at most one clip panel on screen, one preloading
 let vidStandby = 0;
-let pending = null;       // { t, b } staged for the next cut
-let nextCutPhase = 0;
-let cutsDone = 0;
+let vidBusy = [false, false];
+function preloadStandby() {
+  if (vidBusy[vidStandby]) return;
+  const v = vids[vidStandby];
+  v.src = nextClipUrl();
+  v.load();
+}
+function claimVideo() {
+  const i = vidStandby;
+  if (vidBusy[i] || vids[i].readyState < 2) return null;
+  vidBusy[i] = true;
+  vidStandby = 1 - vidStandby;
+  preloadStandby();
+  return vids[i];
+}
+function releaseVideo(v) {
+  const i = vids.indexOf(v);
+  if (i >= 0) { v.pause(); vidBusy[i] = false; }
+}
 
-function prepareNext() {
-  pending = nextSlot();
-  if (pending.t === 'still') {
-    imgs[imgStandby].src = nextStillUrl();
+// ── panels ──
+const livePanels = new Set();
+const liveClockFaces = new Set();
+
+function panelDiv(cell) {
+  const [gx, gy, gw, gh] = cell;
+  const d = document.createElement('div');
+  d.className = 'panel';
+  d.style.left = (gx / GRID * 100) + '%';
+  d.style.top = (gy / GRID * 100) + '%';
+  d.style.width = (gw / GRID * 100) + '%';
+  d.style.height = (gh / GRID * 100) + '%';
+  return d;
+}
+
+function fillContent(d, wantClip) {
+  if (wantClip) {
+    const v = claimVideo();
+    if (v) {
+      v.style.display = 'block';
+      v.currentTime = 0;
+      v.play().catch(() => {});
+      d.appendChild(v);
+      d.dataset.video = '1';
+      return;
+    }
+  }
+  const im = document.createElement('img');
+  im.src = nextStillUrl();
+  d.appendChild(im);
+}
+
+function fillClock(d) {
+  const face = document.createElement('div');
+  face.className = 'clockface';
+  const t = document.createElement('div');
+  t.className = 't';
+  face.appendChild(t);
+  d.appendChild(face);
+  liveClockFaces.add(face);
+  paintClock(face, new Date());
+}
+
+function paintClock(face, date) {
+  const [r, g, b] = HOUR_COLORS[date.getHours()];
+  const invert = date.getSeconds() % 2 === 1;
+  face.style.background = invert ? '#fff' : `rgb(${r},${g},${b})`;
+  face.style.color = invert ? `rgb(${r},${g},${b})` : '#fff';
+  face.querySelector('.t').textContent = date.toTimeString().slice(0, 8);
+}
+
+function showPanel(spec) {
+  const d = panelDiv(spec.cell);
+  spec.el = d;
+  d.dataset.slot = spec.slot;
+  if (spec.kind === 'clock') fillClock(d);
+  else fillContent(d, spec.kind === 'clip');
+  if (spec.mode === 'wipe') d.classList.add('in-' + nextDir());
+  stage.appendChild(d);
+  livePanels.add(d);
+}
+
+// belt-and-braces: any panel surviving two slots past its own is a leak
+function sweepStale() {
+  for (const d of [...livePanels]) {
+    if (slotCount - Number(d.dataset.slot || 0) >= 2) removePanel(d);
+  }
+}
+
+function removePanel(d) {
+  if (!d) return;
+  const v = d.querySelector('video');
+  if (v) { releaseVideo(v); v.style.display = 'none'; document.body.appendChild(v); }
+  const face = d.querySelector('.clockface');
+  if (face) liveClockFaces.delete(face);
+  d.remove();
+  livePanels.delete(d);
+}
+
+function hidePanel(spec) {
+  const d = spec.el;
+  if (!d || !d.isConnected) return;
+  if (spec.mode === 'wipe') {
+    d.className = 'panel out-' + nextDir();
+    let done = false;
+    const fin = () => { if (!done) { done = true; removePanel(d); } };
+    d.addEventListener('animationend', fin, { once: true });
+    setTimeout(fin, 400);
   } else {
-    const v = vids[vidStandby];
-    v.src = nextClipUrl();
-    v.load();
+    removePanel(d);
   }
 }
 
-function pendingReady() {
-  if (!pending) return false;
-  if (pending.t === 'still') {
-    const im = imgs[imgStandby];
-    return im.complete && im.naturalWidth > 0;
-  }
-  return vids[vidStandby].readyState >= 2;
+// ── slot engine: phase-space event queue on the conductor ──
+let events = [];
+function at(phase, prio, fn) {
+  events.push({ phase, prio, fn });
+  events.sort((a, b) => a.phase - b.phase || a.prio - b.prio);
 }
 
-function showOnly(el) {
-  for (const e of [...imgs, ...vids]) {
-    if (e === el) continue;
-    e.style.display = 'none';
-    if (e.tagName === 'VIDEO') e.pause();
-  }
-  el.style.display = 'block';
+let slotCount = 0;
+let nextClockIn = 5 + Math.floor(Math.random() * 4);
+let lastLayout = -1;
+
+function pickLayout() {
+  let i;
+  do { i = Math.floor(Math.random() * LAYOUTS.length); } while (i === lastLayout);
+  lastLayout = i;
+  return LAYOUTS[i];
 }
 
-function doCut() {
-  let el;
-  if (pending.t === 'still') {
-    el = imgs[imgStandby];
-    imgStandby = 1 - imgStandby;
-  } else {
-    el = vids[vidStandby];
-    el.currentTime = 0;
-    el.play().catch(() => {});
-    vidStandby = 1 - vidStandby;
+function pickDuration() {
+  const opts = [1, 1, 2, 2, 2, 3, 4];
+  return opts[Math.floor(Math.random() * opts.length)] * DENSITY[density].mul;
+}
+
+function runSlot(P) {
+  slotCount++;
+  sweepStale();
+  const isClock = --nextClockIn <= 0;
+  if (isClock) nextClockIn = 5 + Math.floor(Math.random() * 4);
+
+  const D = isClock ? 2 * DENSITY[density].mul : pickDuration();
+  const layout = isClock
+    ? (Math.random() < 0.7 ? [[0, 0, 6, 6]] : [[1, 1, 4, 4]])
+    : pickLayout();
+
+  const specs = layout.map((cell, i) => {
+    // a panel must always show strictly before it hides
+    const enter = i === 0 ? 0 : Math.min([0, 0.5, 1][Math.floor(Math.random() * 3)], Math.max(0, D - 0.5));
+    let early = (!isClock && D >= 2 && i > 0 && Math.random() < 0.25) ? 0.5 : 0;
+    if (D - early <= enter) early = 0;
+    return {
+      cell,
+      kind: isClock ? 'clock' : (i === 0 && Math.random() < 0.3 ? 'clip' : 'still'),
+      mode: Math.random() < 0.3 ? 'cut' : 'wipe',
+      enter, early,
+      slot: slotCount,
+    };
+  });
+
+  for (const spec of specs) {
+    at(P + spec.enter, 1, () => showPanel(spec));
+    at(P + D - spec.early, 0, () => hidePanel(spec));
   }
-  showOnly(el);
-  cutsDone++;
+  at(P + D, 2, () => runSlot(P + D));
+}
+
+function processEvents(p) {
+  while (events.length && p >= events[0].phase) {
+    const e = events.shift();
+    // after a background-tab sleep, drop stale cosmetic events but keep
+    // the slot chain alive
+    if (p - e.phase > 2 && e.prio !== 2) continue;
+    e.fn();
+  }
 }
 
 function render() {
-  const p = conductor.phase();
-  if (p - nextCutPhase > 4) {
-    nextCutPhase = Math.ceil(p);             // background-tab resync
-  } else if (p >= nextCutPhase) {
-    if (pendingReady()) {
-      const dur = pending.b * DENSITY[density].mul;
-      doCut();
-      prepareNext();
-      nextCutPhase += dur;
-    } else {
-      nextCutPhase += 1;                     // asset late: hold one beat
-    }
-  }
+  processEvents(conductor.phase());
   requestAnimationFrame(render);
 }
 
 conductor.onBeat((beat) => {
   music.onBeat(beat);
-  statusEl.textContent = `${DENSITY[density].name} · CUT ${String(cutsDone).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
+  // rAF freezes in hidden tabs — the beat keeps the composition engine alive
+  if (document.hidden && entered) processEvents(conductor.phase());
+  for (const face of liveClockFaces) paintClock(face, beat.date);
+  statusEl.textContent = `${DENSITY[density].name} · SLOT ${String(slotCount).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
 
 // ── entry ──
@@ -179,16 +333,8 @@ overlay.addEventListener('click', async () => {
   const [, manifest] = await ready;
   stillPool = manifest;
   music.begin();
-
-  // open on a still immediately — no waiting on video buffers
-  const first = imgs[imgStandby];
-  first.src = nextStillUrl();
-  await new Promise((res) => { first.complete ? res() : first.addEventListener('load', res, { once: true }); });
-  showOnly(first);
-  imgStandby = 1 - imgStandby;
-  prepareNext();
-
-  nextCutPhase = Math.ceil(conductor.phase() + 0.5);
+  preloadStandby();
+  runSlot(Math.ceil(conductor.phase() + 0.3));
   requestAnimationFrame(render);
   setTimeout(() => overlay.remove(), 600);
 });
