@@ -348,7 +348,9 @@ conductor.onBeat((beat) => {
   });
 
   statusEl.textContent = `${TEMPI[tempo].name} · SET ${String(setIndex + 1).padStart(2, '0')}\n${beat.date.toTimeString().slice(0, 8)}`;
-  if (document.hidden && entered) drawFrame();
+  // paint on every beat regardless of visibility: occluded windows
+  // throttle rAF without reporting hidden
+  if (entered) drawFrame();
 });
 
 // ── entry: every ring lands mid-reveal — baked image A, image B already

@@ -449,7 +449,9 @@ metro.addEventListener('click', () => {
 let metroDeg = 0;
 conductor.onBeat((beat) => {
   music.onBeat(beat);
-  if (document.hidden && entered && !paused) processEvents(conductor.phase());
+  // pump on every beat, not just when document.hidden: occluded windows
+  // throttle rAF without reporting hidden, which can stall the slot chain
+  if (entered && !paused) processEvents(conductor.phase());
   metroDeg += 90;
   metro.style.transform = `rotate(${metroDeg}deg)`;
   for (const face of liveClockFaces) paintClock(face, beat.date);
