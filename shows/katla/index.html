@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SHOW 001 — KATLA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
+  #stage { position: absolute; inset: 0; background: #000; }
+  .layer { position: absolute; inset: 0; }
+  .layer .ph { position: absolute; overflow: hidden; }
+  .layer img { width: 100%; height: 100%; object-fit: cover; display: block;
+    transform: scale(1); }
+  .layer.in-top    { animation: inTop 300ms forwards var(--ease-out); }
+  .layer.in-right  { animation: inRight 300ms forwards var(--ease-out); }
+  .layer.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
+  .layer.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
+  @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+  @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+  @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+  @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+  .card { position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 1.6vmin; background: #000; color: #fff; }
+  .card .k { font-size: 11px; letter-spacing: 0.34em; opacity: 0.5; font-weight: 400; }
+  .card .t { font-size: 7vmin; font-weight: 700; letter-spacing: 0.16em; }
+  .card .s { font-size: 1.7vmin; letter-spacing: 0.22em; opacity: 0.65; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="label">SHOW 001 — KATLA · <a href="../../comps/">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">SHOW 001 — KATLA</div>
+  <div class="prompt">the first authored show: a fixed edit, not a generator.
+  every cut and every hold<br>was chosen. it plays on the conductor and loops —
+  36 beats, like a broadcast segment.</div>
+  <div class="prompt">m mute · click to enter, sound on</div>
+</div>
+
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { ROOT } from '../../js/data.js';
+
+const A = ROOT + 'assets/shows/katla/';
+
+// ═══ THE EDIT — authored, fixed, looped. The arc: the mark alone in the
+// dark → the mark on stone → color emerges → the land → the figure →
+// the human story → the design system → shipped → resolve to the mark. ═══
+const SHOW = [
+  { kind: 'card', beats: 4, lines: ['SHOW 001', 'KATLA', 'TITLES & KEY ART — IAAH FOR NETFLIX'] },
+  { kind: 'full', beats: 2, img: 'k02.jpg', cut: 'wipe' },   // the mark, white on black
+  { kind: 'full', beats: 2, img: 'k07.jpg', cut: 'wipe' },   // the mark on slate
+  { kind: 'full', beats: 3, img: 'k05.jpg', cut: 'wipe' },   // pink on volcanic rock
+  { kind: 'full', beats: 3, img: 'k06.jpg', cut: 'wipe' },   // the wide land
+  { kind: 'full', beats: 1, img: 'k05.jpg', cut: 'hard' },   // stutter —
+  { kind: 'full', beats: 1, img: 'k06.jpg', cut: 'hard' },   // — the land pulses
+  { kind: 'full', beats: 5, img: 'k04.jpg', cut: 'wipe' },   // HERO: the figure in mist
+  { kind: 'full', beats: 3, img: 'k01.jpg', cut: 'wipe' },   // wet hair, closer, darker
+  { kind: 'full', beats: 3, img: 'k11.jpg', cut: 'wipe' },   // the mirror — the human story
+  { kind: 'duo',  beats: 3, imgs: ['k00.jpg', 'k09.jpg'] },  // the system: cream lockup + color grid
+  { kind: 'full', beats: 3, img: 'k03.jpg', cut: 'wipe' },   // shipped: in the Netflix UI
+  { kind: 'full', beats: 2, img: 'k02.jpg', cut: 'wipe' },   // resolve to the mark
+  { kind: 'card', beats: 2, lines: ['', 'IAAH', 'EVERY SECOND IS A PERFORMANCE'] },
+];
+const TOTAL = SHOW.reduce((a, c) => a + c.beats, 0); // 37 beats
+const OFFSETS = [];
+{ let t = 0; for (const c of SHOW) { OFFSETS.push(t); t += c.beats; } }
+
+const stage = document.getElementById('stage');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+// preload everything — the show is 1.3MB, it should be seamless
+const cache = new Map();
+function img(name) {
+  if (!cache.has(name)) {
+    const im = new Image();
+    im.src = A + name;
+    cache.set(name, im);
+  }
+  return cache.get(name);
+}
+SHOW.forEach((c) => { if (c.img) img(c.img); if (c.imgs) c.imgs.forEach(img); });
+
+const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
+let dirCount = 0;
+let shownCut = -1;
+let layers = [];
+
+function cutIndexAt(p) {
+  const sp = ((p % TOTAL) + TOTAL) % TOTAL;
+  for (let i = SHOW.length - 1; i >= 0; i--) if (sp >= OFFSETS[i]) return i;
+  return 0;
+}
+
+function buildLayer(cut) {
+  const layer = document.createElement('div');
+  layer.className = 'layer';
+  if (cut.kind === 'card') {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `<div class="k">${cut.lines[0]}</div><div class="t">${cut.lines[1]}</div><div class="s">${cut.lines[2]}</div>`;
+    layer.appendChild(card);
+  } else if (cut.kind === 'duo') {
+    cut.imgs.forEach((name, i) => {
+      const ph = document.createElement('div');
+      ph.className = 'ph';
+      ph.style.left = (i * 50) + '%';
+      ph.style.top = '0';
+      ph.style.width = '50%';
+      ph.style.height = '100%';
+      ph.appendChild(img(name).cloneNode());
+      layer.appendChild(ph);
+    });
+  } else {
+    const ph = document.createElement('div');
+    ph.className = 'ph';
+    ph.style.inset = '0';
+    ph.appendChild(img(cut.img).cloneNode());
+    layer.appendChild(ph);
+  }
+  // the quiet push-in: every hold breathes toward you (the Z idea, made cinematic)
+  requestAnimationFrame(() => {
+    layer.querySelectorAll('img').forEach((im) => {
+      im.style.transition = `transform ${cut.beats}s linear`;
+      im.style.transform = 'scale(1.045)';
+    });
+  });
+  return layer;
+}
+
+function showCut(i) {
+  shownCut = i;
+  const cut = SHOW[i];
+  const layer = buildLayer(cut);
+  if (cut.cut === 'wipe') layer.classList.add('in-' + DIRECTIONS[dirCount++ % 4]);
+  stage.appendChild(layer);
+  layers.push(layer);
+  while (layers.length > 2) layers.shift().remove();
+  if (layers.length === 2) {
+    const old = layers[0];
+    setTimeout(() => { if (old.isConnected && layers[0] === old) { layers.shift(); old.remove(); } }, 400);
+  }
+}
+
+function render() {
+  const i = cutIndexAt(conductor.phase());
+  if (i !== shownCut) showCut(i);
+  requestAnimationFrame(render);
+}
+
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  const i = cutIndexAt(conductor.phase());
+  if (i !== shownCut) showCut(i); // occlusion-proof
+  const sp = Math.floor(((beat.wallSec % TOTAL) + TOTAL) % TOTAL);
+  statusEl.textContent = `CUT ${String(shownCut + 1).padStart(2, '0')}/${SHOW.length} · BEAT ${String(sp + 1).padStart(2, '0')}/${TOTAL} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+let entered = false;
+const musicReady = music.load();
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch((err) => {
+      console.warn('[show] music failed, running silent:', err);
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) music.toggleMute();
+});
+</script>
+
+</body>
+</html>

@@ -3,6 +3,7 @@ import { createMusic } from './music.js';
 import { createClock } from './clock.js';
 import { createClips } from './clips.js';
 import { createMetrics } from './metrics.js';
+import { createDrift } from './drift.js';
 
 const overlay = document.getElementById('overlay');
 const viewContainer = document.getElementById('viewContainer');
@@ -13,11 +14,13 @@ const music = createMusic(conductor);
 const clock = createClock(viewContainer);
 const clips = createClips(player);
 const metrics = createMetrics(conductor, music);
+const drift = createDrift(document.getElementById('driftLayer'));
 
 conductor.onBeat((beat) => {
   clock.onBeat(beat);
   clips.onBeat(beat);
   music.onBeat(beat);
+  drift.onBeat(beat);
   metrics.onBeat(beat);
 });
 
