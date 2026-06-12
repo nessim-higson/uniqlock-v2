@@ -15,7 +15,9 @@
     font-family: "Helvetica Neue", Helvetica, sans-serif; }
   :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
 
-  .panel { position: absolute; overflow: hidden; }
+  #stage { position: absolute; inset: 0; perspective: 1200px; }
+
+  .panel { position: absolute; overflow: hidden; container-type: size; }
   .panel img, .panel video { width: 100%; height: 100%; object-fit: cover; display: block; }
 
   .panel.in-top    { animation: inTop 300ms forwards var(--ease-out); }
@@ -26,6 +28,11 @@
   .panel.out-right  { animation: outRight 300ms forwards var(--ease-out); }
   .panel.out-bottom { animation: outBottom 300ms forwards var(--ease-out); }
   .panel.out-left   { animation: outLeft 300ms forwards var(--ease-out); }
+  .panel.recede {
+    transition: transform 700ms var(--ease-out), opacity 700ms var(--ease-out);
+    transform: translateZ(-300px);
+    opacity: 0;
+  }
 
   @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
   @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
@@ -40,7 +47,13 @@
     justify-content: center; font-family: "Uniqlo", "Helvetica Neue", sans-serif;
     font-weight: 700; }
   .clockface .t { font-size: 14cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
-  .panel { container-type: size; }
+
+  #metro { position: fixed; left: 50%; top: 50%; width: 12vmin; height: 12vmin;
+    margin: -6vmin 0 0 -6vmin; z-index: 4; background: #fff; display: flex;
+    align-items: center; justify-content: center;
+    transition: transform 160ms var(--ease-out); }
+  #metro span { font-family: "Helvetica Neue", Helvetica, sans-serif;
+    font-weight: 700; font-size: 3.2vmin; letter-spacing: 0.04em; color: #111; }
 
   #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
@@ -58,16 +71,17 @@
 </head>
 <body>
 
-<div id="stage" style="position:absolute; inset:0;"></div>
+<div id="stage"></div>
+<div id="metro" style="display:none"><span>IAAH</span></div>
 <video id="v0" muted playsinline preload="auto" style="display:none"></video>
 <video id="v1" muted playsinline preload="auto" style="display:none"></video>
 <div id="label">COMP 05 — BEAT-CUT GRID · <a href="../">back</a></div>
 <div id="status"></div>
 <div id="overlay">
   <div class="wordmark">BEAT-CUT GRID</div>
-  <div class="prompt">an invisible grid; the archive arrives and leaves it in changing
-  compositions,<br>every entrance and exit on the metronome. the clock visits to
-  remind you who's conducting.</div>
+  <div class="prompt">the archive composes itself on the metronome — aspect-true panels
+  butting<br>against each other, receding into depth, the clock visiting. every move
+  on the beat.</div>
   <div class="prompt">1 / 2 / 3 — density · m mute · click to enter, sound on</div>
 </div>
 
@@ -77,6 +91,7 @@ import { createMusic } from '../../js/music.js';
 import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/data.js';
 
 const stage = document.getElementById('stage');
+const metro = document.getElementById('metro');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const vids = [document.getElementById('v0'), document.getElementById('v1')];
@@ -84,33 +99,19 @@ const vids = [document.getElementById('v0'), document.getElementById('v1')];
 const conductor = createConductor();
 const music = createMusic(conductor);
 
-const DENSITY = { 1: { mul: 2, name: 'HALF-TIME' }, 2: { mul: 1, name: 'ON THE BEAT' }, 3: { mul: 0.5, name: 'DOUBLE-TIME' } };
+// all durations in WHOLE beats — every entrance and exit lands on a tick
+const DENSITY = {
+  1: { durs: [2, 4, 4, 6, 8], name: 'HALF-TIME' },
+  2: { durs: [1, 2, 2, 3, 4], name: 'ON THE BEAT' },
+  3: { durs: [1, 1, 2, 2], name: 'DOUBLE-TIME' },
+};
 let density = 2;
 
-// ── the invisible grid: 6 × 6, panels live in grid units [x, y, w, h] ──
-const GRID = 6;
-const LAYOUTS = [
-  [[0, 0, 6, 6]],
-  [[0, 0, 3, 6]],
-  [[3, 0, 3, 6]],
-  [[0, 0, 2, 6], [4, 0, 2, 6]],
-  [[0, 0, 2, 6], [2, 0, 2, 6], [4, 0, 2, 6]],
-  [[1, 1, 4, 4]],
-  [[0, 0, 4, 6], [4, 4, 2, 2]],
-  [[0, 0, 6, 3]],
-  [[0, 3, 6, 3]],
-  [[3, 0, 3, 3], [0, 3, 3, 3]],
-  [[0, 1, 2, 4], [4, 0, 2, 3]],
-  [[2, 0, 2, 6], [0, 2, 2, 2], [4, 3, 2, 3]],
-  [[4, 0, 2, 2]],
-  [[0, 4, 2, 2]],
-];
-const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
-let dirCount = 0;
-function nextDir() { return DIRECTIONS[dirCount++ % 4]; }
+// ── pools: stills preloaded ahead so their native aspect is known at
+//    composition time — panels are sized BY the image, never cropping it ──
+let stillPool = [], stillQueue = [];
+const staged = [];
 
-// ── pools ──
-let stillPool = [], stillQueue = [], clipQueue = [];
 function shuffled(list) {
   const a = [...list];
   for (let i = a.length - 1; i > 0; i--) {
@@ -123,12 +124,32 @@ function nextStillUrl() {
   if (!stillQueue.length) stillQueue = shuffled(stillPool);
   return stillQueue.pop();
 }
+
+function ensureStaged() {
+  while (staged.length < 8 && stillPool.length) {
+    const img = new Image();
+    const entry = { img, aspect: 4 / 3, ready: false };
+    img.onload = () => {
+      entry.aspect = img.naturalWidth / img.naturalHeight;
+      entry.ready = true;
+    };
+    img.onerror = () => { entry.ready = true; };
+    img.src = nextStillUrl();
+    staged.push(entry);
+  }
+}
+function takeStill() {
+  const i = staged.findIndex((e) => e.ready);
+  const entry = i >= 0 ? staged.splice(i, 1)[0] : staged.shift();
+  ensureStaged();
+  return entry;
+}
+
+let clipQueue = [];
 function nextClipUrl() {
   if (!clipQueue.length) clipQueue = shuffled(VIDEOS[timeOfDay(new Date().getHours())]);
   return clipQueue.pop();
 }
-
-// video claim/release — at most one clip panel on screen, one preloading
 let vidStandby = 0;
 let vidBusy = [false, false];
 function preloadStandby() {
@@ -150,77 +171,97 @@ function releaseVideo(v) {
   if (i >= 0) { v.pause(); vidBusy[i] = false; }
 }
 
+// ── the composer: aspect-true panels that BUTT against each other.
+//    first panel anchors; the rest sit flush on a shared edge, tops and
+//    bottoms deliberately misaligned. black is negative space. ──
+function composeSlot(wantClip) {
+  const VW = innerWidth, VH = innerHeight;
+  const n = [1, 1, 2, 2, 2, 3][Math.floor(Math.random() * 6)];
+  const specs = [];
+  let prev = null;
+
+  for (let i = 0; i < n; i++) {
+    let content = null, aspect;
+    if (wantClip && i === 0) {
+      const v = claimVideo();
+      if (v) {
+        content = { kind: 'clip', el: v };
+        aspect = (v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : 4 / 3;
+      }
+    }
+    if (!content) {
+      const s = takeStill();
+      if (!s) break;
+      content = { kind: 'still', el: s.img };
+      aspect = s.aspect;
+    }
+
+    let h = VH * [0.5, 0.62, 0.8, 1][Math.floor(Math.random() * 4)];
+    let w = h * aspect;
+    if (w > VW) { h *= VW / w; w = VW; }
+
+    let xPos, yPos;
+    if (!prev) {
+      xPos = [0, (VW - w) / 2, VW - w, VW * 0.08, VW * 0.55][Math.floor(Math.random() * 5)];
+      xPos = Math.max(0, Math.min(VW - w, xPos));
+      yPos = [0, (VH - h) / 2, VH - h][Math.floor(Math.random() * 3)];
+    } else {
+      // butt against the previous panel: flush seam, offset alignment
+      if (prev.x + prev.w + w <= VW + w * 0.15) xPos = prev.x + prev.w;
+      else xPos = prev.x - w;
+      const yOpts = [prev.y, prev.y + prev.h - h, prev.y + prev.h / 2 - h / 2];
+      yPos = yOpts[Math.floor(Math.random() * 3)];
+    }
+    xPos = Math.max(-w * 0.12, Math.min(VW - w * 0.88, xPos));
+    yPos = Math.max(-h * 0.12, Math.min(VH - h * 0.88, yPos));
+
+    const spec = { x: xPos, y: yPos, w, h, content };
+    specs.push(spec);
+    prev = spec;
+    // a near-full-width anchor owns the frame — companions would only
+    // bleed offscreen
+    if (i === 0 && w > VW * 0.82) break;
+  }
+  return specs;
+}
+
 // ── panels ──
 const livePanels = new Set();
 const liveClockFaces = new Set();
-
-function panelDiv(cell) {
-  const [gx, gy, gw, gh] = cell;
-  const d = document.createElement('div');
-  d.className = 'panel';
-  d.style.left = (gx / GRID * 100) + '%';
-  d.style.top = (gy / GRID * 100) + '%';
-  d.style.width = (gw / GRID * 100) + '%';
-  d.style.height = (gh / GRID * 100) + '%';
-  return d;
-}
-
-function fillContent(d, wantClip) {
-  if (wantClip) {
-    const v = claimVideo();
-    if (v) {
-      v.style.display = 'block';
-      v.currentTime = 0;
-      v.play().catch(() => {});
-      d.appendChild(v);
-      d.dataset.video = '1';
-      return;
-    }
-  }
-  const im = document.createElement('img');
-  im.src = nextStillUrl();
-  d.appendChild(im);
-}
-
-function fillClock(d) {
-  const face = document.createElement('div');
-  face.className = 'clockface';
-  const t = document.createElement('div');
-  t.className = 't';
-  face.appendChild(t);
-  d.appendChild(face);
-  liveClockFaces.add(face);
-  paintClock(face, new Date());
-}
-
-function paintClock(face, date) {
-  const [r, g, b] = HOUR_COLORS[date.getHours()];
-  const invert = date.getSeconds() % 2 === 1;
-  face.style.background = invert ? '#fff' : `rgb(${r},${g},${b})`;
-  face.style.color = invert ? `rgb(${r},${g},${b})` : '#fff';
-  face.querySelector('.t').textContent = date.toTimeString().slice(0, 8);
-}
+const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
+let dirCount = 0;
+function nextDir() { return DIRECTIONS[dirCount++ % 4]; }
 
 function showPanel(spec) {
-  const d = panelDiv(spec.cell);
-  spec.el = d;
+  const d = document.createElement('div');
+  d.className = 'panel';
+  d.style.left = spec.x + 'px';
+  d.style.top = spec.y + 'px';
+  d.style.width = spec.w + 'px';
+  d.style.height = spec.h + 'px';
   d.dataset.slot = spec.slot;
-  if (spec.kind === 'clock') fillClock(d);
-  else fillContent(d, spec.kind === 'clip');
+  spec.el = d;
+
+  if (spec.content.kind === 'clock') {
+    fillClock(d);
+  } else if (spec.content.kind === 'clip') {
+    const v = spec.content.el;
+    v.style.display = 'block';
+    v.currentTime = 0;
+    v.play().catch(() => {});
+    d.appendChild(v);
+  } else {
+    const im = spec.content.el.cloneNode();
+    d.appendChild(im);
+  }
+
   if (spec.mode === 'wipe') d.classList.add('in-' + nextDir());
   stage.appendChild(d);
   livePanels.add(d);
 }
 
-// belt-and-braces: any panel surviving two slots past its own is a leak
-function sweepStale() {
-  for (const d of [...livePanels]) {
-    if (slotCount - Number(d.dataset.slot || 0) >= 2) removePanel(d);
-  }
-}
-
 function removePanel(d) {
-  if (!d) return;
+  if (!d || !d.isConnected) return;
   const v = d.querySelector('video');
   if (v) { releaseVideo(v); v.style.display = 'none'; document.body.appendChild(v); }
   const face = d.querySelector('.clockface');
@@ -232,7 +273,11 @@ function removePanel(d) {
 function hidePanel(spec) {
   const d = spec.el;
   if (!d || !d.isConnected) return;
-  if (spec.mode === 'wipe') {
+  if (spec.exit === 'recede') {
+    // shift back in Z — the next composition arrives in front of it
+    d.classList.add('recede');
+    setTimeout(() => removePanel(d), 750);
+  } else if (spec.exit === 'wipe') {
     d.className = 'panel out-' + nextDir();
     let done = false;
     const fin = () => { if (!done) { done = true; removePanel(d); } };
@@ -243,7 +288,26 @@ function hidePanel(spec) {
   }
 }
 
-// ── slot engine: phase-space event queue on the conductor ──
+// ── the clock interstitial ──
+function fillClock(d) {
+  const face = document.createElement('div');
+  face.className = 'clockface';
+  const t = document.createElement('div');
+  t.className = 't';
+  face.appendChild(t);
+  d.appendChild(face);
+  liveClockFaces.add(face);
+  paintClock(face, new Date());
+}
+function paintClock(face, date) {
+  const [r, g, b] = HOUR_COLORS[date.getHours()];
+  const invert = date.getSeconds() % 2 === 1;
+  face.style.background = invert ? '#fff' : `rgb(${r},${g},${b})`;
+  face.style.color = invert ? `rgb(${r},${g},${b})` : '#fff';
+  face.querySelector('.t').textContent = date.toTimeString().slice(0, 8);
+}
+
+// ── slot engine: phase-space events, everything on whole beats ──
 let events = [];
 function at(phase, prio, fn) {
   events.push({ phase, prio, fn });
@@ -252,18 +316,11 @@ function at(phase, prio, fn) {
 
 let slotCount = 0;
 let nextClockIn = 5 + Math.floor(Math.random() * 4);
-let lastLayout = -1;
 
-function pickLayout() {
-  let i;
-  do { i = Math.floor(Math.random() * LAYOUTS.length); } while (i === lastLayout);
-  lastLayout = i;
-  return LAYOUTS[i];
-}
-
-function pickDuration() {
-  const opts = [1, 1, 2, 2, 2, 3, 4];
-  return opts[Math.floor(Math.random() * opts.length)] * DENSITY[density].mul;
+function sweepStale() {
+  for (const d of [...livePanels]) {
+    if (slotCount - Number(d.dataset.slot || 0) >= 2) removePanel(d);
+  }
 }
 
 function runSlot(P) {
@@ -272,37 +329,38 @@ function runSlot(P) {
   const isClock = --nextClockIn <= 0;
   if (isClock) nextClockIn = 5 + Math.floor(Math.random() * 4);
 
-  const D = isClock ? 2 * DENSITY[density].mul : pickDuration();
-  const layout = isClock
-    ? (Math.random() < 0.7 ? [[0, 0, 6, 6]] : [[1, 1, 4, 4]])
-    : pickLayout();
+  const durs = DENSITY[density].durs;
+  const D = isClock ? 2 : durs[Math.floor(Math.random() * durs.length)];
 
-  const specs = layout.map((cell, i) => {
-    // a panel must always show strictly before it hides
-    const enter = i === 0 ? 0 : Math.min([0, 0.5, 1][Math.floor(Math.random() * 3)], Math.max(0, D - 0.5));
-    let early = (!isClock && D >= 2 && i > 0 && Math.random() < 0.25) ? 0.5 : 0;
-    if (D - early <= enter) early = 0;
-    return {
-      cell,
-      kind: isClock ? 'clock' : (i === 0 && Math.random() < 0.3 ? 'clip' : 'still'),
-      mode: Math.random() < 0.3 ? 'cut' : 'wipe',
-      enter, early,
-      slot: slotCount,
-    };
+  let specs;
+  if (isClock) {
+    const VW = innerWidth, VH = innerHeight;
+    const side = Math.random() < 0.6 ? Math.min(VW, VH) : Math.min(VW, VH) * 0.55;
+    specs = [{
+      x: (VW - side) / 2, y: (VH - side) / 2, w: side, h: side,
+      content: { kind: 'clock' },
+    }];
+  } else {
+    specs = composeSlot(Math.random() < 0.3);
+  }
+
+  specs.forEach((spec, i) => {
+    spec.slot = slotCount;
+    spec.mode = Math.random() < 0.3 ? 'cut' : 'wipe';
+    spec.exit = isClock ? 'wipe' : (Math.random() < 0.3 ? 'recede' : Math.random() < 0.6 ? 'wipe' : 'cut');
+    // entrances on whole beats only: anchor on the slot beat, others may
+    // join exactly one beat later (when the slot is long enough)
+    const enter = (i > 0 && D >= 2 && Math.random() < 0.5) ? 1 : 0;
+    at(P + enter, 1, () => showPanel(spec));
+    at(P + D, 0, () => hidePanel(spec));
   });
 
-  for (const spec of specs) {
-    at(P + spec.enter, 1, () => showPanel(spec));
-    at(P + D - spec.early, 0, () => hidePanel(spec));
-  }
   at(P + D, 2, () => runSlot(P + D));
 }
 
 function processEvents(p) {
   while (events.length && p >= events[0].phase) {
     const e = events.shift();
-    // after a background-tab sleep, drop stale cosmetic events but keep
-    // the slot chain alive
     if (p - e.phase > 2 && e.prio !== 2) continue;
     e.fn();
   }
@@ -313,16 +371,18 @@ function render() {
   requestAnimationFrame(render);
 }
 
+// ── the metronome made visible: the IAAH box turns on every beat ──
+let metroDeg = 0;
 conductor.onBeat((beat) => {
   music.onBeat(beat);
-  // rAF freezes in hidden tabs — the beat keeps the composition engine alive
   if (document.hidden && entered) processEvents(conductor.phase());
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
   for (const face of liveClockFaces) paintClock(face, beat.date);
   statusEl.textContent = `${DENSITY[density].name} · SLOT ${String(slotCount).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
 
-// ── entry: visuals start immediately; the music (4.7MB) joins the moment
-// it's downloaded and decoded. Never block the piece on the soundtrack. ──
+// ── entry: visuals immediately, music joins when ready ──
 let entered = false;
 const manifestReady = loadImageryManifest();
 const musicReady = music.load();
@@ -333,8 +393,10 @@ overlay.addEventListener('click', async () => {
   try {
     await conductor.start();
     stillPool = await manifestReady;
+    ensureStaged();
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
+    metro.style.display = 'flex';
     preloadStandby();
     runSlot(Math.ceil(conductor.phase() + 0.3));
     requestAnimationFrame(render);
