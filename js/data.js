@@ -3,6 +3,10 @@
 
 export const ASSETS = 'https://megajerk.github.io/Uniqlock/assets';
 
+// Repo root, derived from this module's location — keeps local asset URLs
+// correct when a page lives in a subdirectory (comps/*).
+export const ROOT = new URL('..', import.meta.url).href;
+
 // colorBySeason["1"] — 24 hour colors, index = hour of day
 export const HOUR_COLORS = [
   [125, 0, 34], [23, 23, 156], [190, 27, 190], [19, 206, 164],
@@ -27,9 +31,16 @@ export const VIDEOS = {
 // the piece would run silent on iPhone).
 export const MUSIC = {
   day: ['00 - Season 1', '01 - Season 1', '02 - Season 1']
-    .map((f) => `assets/music/${f}.m4a`),
-  night: ['assets/music/Night - 01 - Season 2.m4a'],
+    .map((f) => `${ROOT}assets/music/${f}.m4a`),
+  night: [`${ROOT}assets/music/Night - 01 - Season 2.m4a`],
 };
+
+// Starter imagery pool harvested from iamalwayshungry.com (DatoCMS).
+export async function loadImageryManifest() {
+  const res = await fetch(`${ROOT}assets/imagery/manifest.json`);
+  const names = await res.json();
+  return names.map((n) => `${ROOT}assets/imagery/${n}`);
+}
 
 // Rewind default custom config: night 21:00–06:00 (midnight folded into night
 // for the Phase 1 rhythm core), day 06:00–21:00.

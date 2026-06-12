@@ -137,6 +137,12 @@ export function createConductor() {
       return epochAudio + (wallSec - epochWallSec);
     },
 
+    // Continuous wall-clock seconds (fractional, Unix-based), derived from
+    // the audio clock — sub-frame smooth, for sweeps and eased motion.
+    phase() {
+      return epochWallSec + (ctx.currentTime - epochAudio);
+    },
+
     // Next wall-clock second strictly after "now" plus a safety margin,
     // so audio scheduled against it is always in the future.
     nextSchedulableWallSec(marginSec = 0.05) {
