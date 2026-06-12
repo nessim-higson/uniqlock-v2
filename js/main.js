@@ -24,6 +24,10 @@ conductor.onBeat((beat) => {
 let entered = false;
 const musicReady = music.load();
 
+// iOS: route Web Audio as media playback so the hardware silent switch
+// doesn't mute it (Safari 16.4+; harmless elsewhere).
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* optional */ }
+
 overlay.addEventListener('click', async () => {
   if (entered) return;
   entered = true;
@@ -46,3 +50,17 @@ document.addEventListener('keydown', (e) => {
     document.getElementById('muteHint').textContent = music.toggleMute() ? 'muted — m to unmute' : '';
   }
 });
+
+// iOS suspends the AudioContext on lock/interruption; revive it when the
+// page comes back (and on any tap, as a belt-and-braces fallback).
+function revive() {
+  if (!entered || conductor.ctx.state === 'running') return;
+  conductor.ctx.resume().then(() => {
+    conductor.resync();
+    music.resync();
+  });
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') revive();
+});
+document.addEventListener('touchend', revive, { passive: true });

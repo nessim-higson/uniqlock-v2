@@ -87,6 +87,16 @@ export function createMusic(conductor) {
       }
     },
 
+    // Partner to conductor.resync(): kill any source scheduled against the
+    // stale epoch; the next beat's recovery path reschedules cleanly.
+    resync() {
+      if (currentSource) {
+        try { currentSource.src.stop(); } catch { /* already ended */ }
+        currentSource = null;
+      }
+      scheduledForMinute = -1;
+    },
+
     toggleMute() {
       muted = !muted;
       gain.gain.setValueAtTime(muted ? 0 : 1, ctx.currentTime);

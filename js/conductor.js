@@ -121,6 +121,13 @@ export function createConductor() {
       cancelAnimationFrame(rafId);
     },
 
+    // After an AudioContext suspension (iOS lock/interruption) the audio
+    // clock has paused while wall time kept going — the old epoch is a lie.
+    // Re-anchor from scratch.
+    resync() {
+      anchor();
+    },
+
     onBeat(fn) {
       listeners.push(fn);
     },

@@ -22,10 +22,13 @@ export const VIDEOS = {
   night: seq(42).map((n) => `${ASSETS}/videos/Season 2/Season 2 - Night - ${n}.webm`),
 };
 
+// Self-hosted AAC transcodes of the FPM tracks — the CDN originals are
+// OGG/Vorbis, which iOS Safari cannot decode (decodeAudioData rejects and
+// the piece would run silent on iPhone).
 export const MUSIC = {
-  day: ['00 - Season 1.ogg', '01 - Season 1.ogg', '02 - Season 1.ogg']
-    .map((f) => `${ASSETS}/music/${f}`),
-  night: [`${ASSETS}/music/Night - 01 - Season 2.ogg`],
+  day: ['00 - Season 1', '01 - Season 1', '02 - Season 1']
+    .map((f) => `assets/music/${f}.m4a`),
+  night: ['assets/music/Night - 01 - Season 2.m4a'],
 };
 
 // Rewind default custom config: night 21:00–06:00 (midnight folded into night
