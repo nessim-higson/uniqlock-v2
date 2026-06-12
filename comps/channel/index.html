@@ -20,24 +20,14 @@
   .panel { position: absolute; overflow: hidden; container-type: size; }
   .panel img, .panel video { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-  /* the composition breathes on the beat: panel contents bob in counterpoint
-     (odd/even panels alternate), retriggered by the tick-a/tick-b flip */
-  #stage.tick-a .panel:not(.recede):nth-child(odd) > *,
-  #stage.tick-b .panel:not(.recede):nth-child(even) > * {
-    animation: bobIn 420ms var(--ease-out);
-  }
-  #stage.tick-a .panel:not(.recede):nth-child(even) > *,
-  #stage.tick-b .panel:not(.recede):nth-child(odd) > * {
-    animation: bobOut 420ms var(--ease-out);
-  }
-  @keyframes bobIn  { 25% { transform: scale(1.022) translateY(-3px); } }
-  @keyframes bobOut { 25% { transform: scale(1.008); } }
+  /* beat motion lives in the perspective sway and the wipes — no element
+     pulsation (removed per feedback) */
   .panel.in-top    { animation: inTop 300ms forwards var(--ease-out); }
   .panel.in-right  { animation: inRight 300ms forwards var(--ease-out); }
   .panel.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
   .panel.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
-  .panel.recede { transition: transform 700ms var(--ease-out), opacity 700ms var(--ease-out);
-    transform: translateZ(-300px); opacity: 0; }
+  .panel.recede { transition: transform 450ms var(--ease-out), opacity 450ms var(--ease-out);
+    transform: translateZ(-280px); opacity: 0; }
   @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
   @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
   @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
@@ -98,7 +88,15 @@
 <script type="module">
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
-import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/data.js';
+import { VIDEOS, HOUR_COLORS, ROOT, timeOfDay, loadImageryManifest } from '../../js/data.js';
+
+// the NEVVERLAND reel as a video source: measured shot boundaries, each
+// playable as its own clip (seek + play)
+const NV_SRC = ROOT + 'assets/reel/nevverland.m4v';
+const NV_SHOTS = [
+  [0.00, 1.30], [1.30, 2.33], [3.63, 1.37], [5.80, 1.63],
+  [7.43, 1.64], [9.07, 1.30], [10.37, 2.50], [12.87, 1.31],
+];
 
 const stage = document.getElementById('stage');
 const metro = document.getElementById('metro');
@@ -115,9 +113,9 @@ const music = createMusic(conductor);
 // ═══ the schedule IS the tempo system ═══
 const BLOCKS = {
   testcard:  { name: 'TEST CARD',  hours: [0, 6] },
-  morning:   { name: 'MORNING',    hours: [6, 11], durs: [4, 6, 6, 8], counts: [1, 1, 1, 2], clipP: 0.15, identEvery: 12, bg: '#f2efe9' },
-  daytime:   { name: 'DAYTIME',    hours: [11, 18], durs: [1, 2, 2, 3], counts: [1, 1, 2, 2, 2, 3], clipP: 0.3, identEvery: 9, bg: '#000' },
-  primetime: { name: 'PRIMETIME',  hours: [18, 24], durs: [1, 1, 2, 2], counts: [2, 2, 3, 3], clipP: 0.45, identEvery: 7, bg: '#000' },
+  morning:   { name: 'MORNING',    hours: [6, 11], durs: [4, 6, 6, 8], counts: [1, 1, 1, 2], clipP: 0.25, identEvery: 12, bg: '#f2efe9' },
+  daytime:   { name: 'DAYTIME',    hours: [11, 18], durs: [1, 2, 2, 3], counts: [1, 1, 2, 2, 2, 3], clipP: 0.45, identEvery: 9, bg: '#000' },
+  primetime: { name: 'PRIMETIME',  hours: [18, 24], durs: [1, 1, 2, 2], counts: [2, 2, 3, 3], clipP: 0.6, identEvery: 7, bg: '#000' },
 };
 let previewBlock = null; // key override via 0/1/2/3; null = live schedule
 
@@ -181,11 +179,12 @@ function genSlot(w) {
   } else {
     const n = blk.counts[Math.floor(rng() * blk.counts.length)];
     for (let i = 0; i < n; i++) {
+      // clip index spans the UNIQLOCK pool + the NEVVERLAND shots
+      const clipPool = VIDEOS[timeOfDay(hour)].length + NV_SHOTS.length;
       desc.panels.push({
         still: pickStill(w),
-        clip: i === 0 && rng() < blk.clipP
-          ? Math.floor(rng() * VIDEOS[timeOfDay(hour)].length) : null,
-        hIdx: Math.floor(rng() * 4),
+        clip: i === 0 && rng() < blk.clipP ? Math.floor(rng() * clipPool) : null,
+        hIdx: Math.floor(rng() * 3),
         xIdx: Math.floor(rng() * 5),
         yIdx: [0, 0, 1, 1, 2][Math.floor(rng() * 5)],
         enter: (i > 0 && D >= 2 && rng() < 0.5) ? 1 : 0,
@@ -243,14 +242,38 @@ function claimVideo() {
   return vids[i];
 }
 function releaseVideo(v) {
+  if (v === vnv) { v.pause(); vnvBusy = false; return; }
   const i = vids.indexOf(v);
   if (i >= 0) { v.pause(); vidBusy[i] = false; }
 }
+
+// dedicated element for the reel: loaded once, seeked per shot
+const vnv = document.createElement('video');
+vnv.muted = true; vnv.playsInline = true; vnv.preload = 'auto';
+vnv.style.display = 'none';
+document.body.appendChild(vnv);
+let vnvBusy = false;
+function claimReel(shot) {
+  if (vnvBusy || vnv.readyState < 2) return null;
+  vnvBusy = true;
+  vnv.currentTime = shot[0] + 0.04;
+  return vnv;
+}
+
+function resolveClip(p, descStart) {
+  const uqPool = VIDEOS[timeOfDay(new Date(descStart * 1000).getHours())];
+  if (p.clip < uqPool.length) return { kind: 'uq', url: uqPool[p.clip] };
+  return { kind: 'nv', shot: NV_SHOTS[p.clip - uqPool.length] };
+}
+
 function preloadDesc(desc) {
   if (!desc.panels) return;
   for (const p of desc.panels) {
     ensureImg(stillPool[p.still]);
-    if (p.clip !== null) preloadClip(VIDEOS[timeOfDay(new Date(desc.start * 1000).getHours())][p.clip]);
+    if (p.clip !== null) {
+      const c = resolveClip(p, desc.start);
+      if (c.kind === 'uq') preloadClip(c.url);
+    }
   }
 }
 
@@ -264,15 +287,24 @@ function composeFromDesc(desc) {
     const ys = [VH * 0.08, (VH - side) / 2, VH - side - VH * 0.08];
     return [{ x: xs[desc.posIdx[0]], y: ys[desc.posIdx[1]], w: side, h: side, content: { kind: 'clock' }, enter: 0 }];
   }
+  // ── disciplined composition (per the showreel reference frames):
+  //    heights quantized to full / two-thirds / half of the viewport,
+  //    anchors snapped to a 12-column grid, companions flush on shared
+  //    seams with shared top/bottom edges, NOTHING bleeds offscreen,
+  //    NOTHING overlaps, and the finished group is balanced to the frame.
+  const COLS = 12;
+  const colW = VW / COLS;
   const specs = [];
   let prev = null;
+
   for (const p of desc.panels) {
     let content = null, aspect;
     if (p.clip !== null) {
-      const v = claimVideo();
+      const c = resolveClip(p, desc.start);
+      const v = c.kind === 'uq' ? claimVideo() : claimReel(c.shot);
       if (v) {
         content = { kind: 'clip', el: v };
-        aspect = (v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : 4 / 3;
+        aspect = (v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : 16 / 9;
       }
     }
     if (!content) {
@@ -280,23 +312,53 @@ function composeFromDesc(desc) {
       content = { kind: 'still', el: e.img };
       aspect = e.aspect;
     }
-    let h = VH * [0.5, 0.62, 0.8, 1][p.hIdx];
+
+    // clips earn bigger placements
+    const hFrac = content.kind === 'clip'
+      ? [1, 2 / 3, 1][p.hIdx % 3]
+      : [1, 2 / 3, 1 / 2][p.hIdx % 3];
+    let h = VH * hFrac;
     let w = h * aspect;
     if (w > VW) { h *= VW / w; w = VW; }
-    let xPos, yPos;
+
+    let x, y;
     if (!prev) {
-      xPos = Math.max(0, Math.min(VW - w, [0, (VW - w) / 2, VW - w, VW * 0.08, VW * 0.55][p.xIdx]));
-      yPos = [0, (VH - h) / 2, VH - h][p.yIdx];
+      if (w > VW * 0.9) {
+        specs.push({ x: (VW - w) / 2, y: (VH - h) / 2, w, h, content, enter: 0 });
+        break; // full-frame solo
+      }
+      const xRaw = [0, (VW - w) / 2, VW - w, colW * 2, colW * 7][p.xIdx];
+      x = Math.round(xRaw / colW) * colW;
+      x = Math.max(0, Math.min(VW - w, x));
+      y = [0, (VH - h) / 2, VH - h][p.yIdx];
     } else {
-      xPos = (prev.x + prev.w + w <= VW + w * 0.15) ? prev.x + prev.w : prev.x - w;
-      yPos = [prev.y, prev.y + prev.h - h, prev.y + prev.h / 2 - h / 2][p.yIdx];
+      // fit the companion to whatever room the seam offers — shrink it
+      // rather than skip it, so duos and trios survive
+      const roomRight = VW - (prev.x + prev.w);
+      const roomLeft = prev.x;
+      const room = Math.max(roomRight, roomLeft);
+      if (w > room) {
+        h = Math.min(h, (room / aspect) * 0.998);
+        w = h * aspect;
+        if (h < VH * 0.28) continue; // genuinely no room: skip, never overlap
+      }
+      x = (w <= roomRight + 0.5) ? prev.x + prev.w : prev.x - w;
+      y = [prev.y, prev.y + prev.h - h, prev.y + (prev.h - h) / 2][p.yIdx];
+      y = Math.max(0, Math.min(VH - h, y));
     }
-    xPos = Math.max(-w * 0.12, Math.min(VW - w * 0.88, xPos));
-    yPos = Math.max(-h * 0.12, Math.min(VH - h * 0.88, yPos));
-    const spec = { x: xPos, y: yPos, w, h, content, enter: p.enter };
+    const spec = { x, y, w, h, content, enter: p.enter };
     specs.push(spec);
     prev = spec;
-    if (specs.length === 1 && w > VW * 0.82) break;
+  }
+
+  // balance the whole group against the frame: left-flush, centered, or
+  // right-flush, chosen deterministically
+  if (specs.length && specs[0].w <= VW * 0.9) {
+    const minX = Math.min(...specs.map((s) => s.x));
+    const maxX = Math.max(...specs.map((s) => s.x + s.w));
+    const bw = maxX - minX;
+    const dx = [-minX, (VW - bw) / 2 - minX, VW - bw - minX][desc.panels[0].xIdx % 3];
+    for (const s of specs) s.x += dx;
   }
   return specs;
 }
@@ -318,7 +380,9 @@ function showPanel(spec, slot) {
   if (spec.content.kind === 'clock') fillClock(d);
   else if (spec.content.kind === 'clip') {
     const v = spec.content.el;
-    v.style.display = 'block'; v.currentTime = 0; v.play().catch(() => {});
+    v.style.display = 'block';
+    if (v !== vnv) v.currentTime = 0; // the reel is pre-seeked to its shot
+    v.play().catch(() => {});
     d.appendChild(v);
   } else d.appendChild(spec.content.el.cloneNode());
   d.classList.add('in-' + nextDir());
@@ -338,7 +402,7 @@ function hidePanel(spec) {
   const d = spec.el;
   if (!d || !d.isConnected) return;
   d.classList.add('recede');
-  setTimeout(() => removePanel(d), 750);
+  setTimeout(() => removePanel(d), 480);
 }
 function fillClock(d) {
   const face = document.createElement('div');
@@ -442,6 +506,7 @@ function runSlot() {
     setMode('comp');
     stage.style.background = BLOCKS[desc.block || blockForHour(new Date(desc.start * 1000).getHours())]?.bg || '#000';
     const specs = composeFromDesc(desc);
+    window.__lastCompose = { wanted: desc.panels.length, got: specs.length, rects: specs.map((s) => [s.x | 0, s.y | 0, s.w | 0, s.h | 0].join(',')) };
     for (const spec of specs) {
       at(desc.start + spec.enter, 1, () => showPanel(spec, slotCount));
       at(desc.start + desc.D, 0, () => hidePanel(spec));
@@ -479,12 +544,10 @@ conductor.onBeat((beat) => {
   metroDeg += 90;
   metro.style.transform = `rotate(${metroDeg}deg)`;
 
-  // the metronome moves the room: panels bob in counterpoint, the whole
-  // depth space leans a step left/right on alternate beats
+  // the metronome moves the room: the depth space leans a gentle step
+  // left/right on alternate beats (no element pulsation)
   const even = beat.n % 2 === 0;
-  stage.classList.toggle('tick-a', even);
-  stage.classList.toggle('tick-b', !even);
-  stage.style.perspectiveOrigin = `${50 + (even ? 1.8 : -1.8)}% ${50 + (even ? -1 : 1)}%`;
+  stage.style.perspectiveOrigin = `${50 + (even ? 1.1 : -1.1)}% 50%`;
   if (mode === 'ident') {
     identDeg += 90;
     identBox.style.transform = `rotate(${identDeg}deg)`;
@@ -516,6 +579,8 @@ overlay.addEventListener('click', async () => {
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
     metro.style.display = 'flex';
+    vnv.src = NV_SRC;
+    vnv.load();
     restartSchedule();
     requestAnimationFrame(render);
     musicReady.then(() => { if (!musicDucked) music.begin(); else { music.begin(); } }).catch((err) => {

@@ -43,9 +43,9 @@
 <div id="status"></div>
 <div id="overlay">
   <div class="wordmark">Z-RUSH</div>
-  <div class="prompt">the archive comes at you — a new piece every two beats, stepped on
-  the metronome,<br>through the bent glass. the clock and the dancers ride the same
-  stream.<br>deterministic: same minute, same rush, for everyone.</div>
+  <div class="prompt">a gallery rushing past, every piece facing you — a hero work
+  presented dead-center<br>every eight beats, the field scattered around your path.
+  the clock and the dancers<br>ride the same stream. same minute, same rush, for everyone.</div>
   <div class="prompt">m mute · click to enter, sound on</div>
 </div>
 
@@ -65,7 +65,7 @@ const music = createMusic(conductor);
 // ═══ the conveyor: plane n arrives at the camera exactly at beat n*B.
 // distance is a stepped function of the clock — the rush IS the beat. ═══
 const B = 2;        // beats between arrivals
-const GAP = 8;      // world units between planes (4 units per beat-step)
+const GAP = 7;      // world units between planes (3.5 units per beat-step)
 
 function mulberry32(a) {
   return function () {
@@ -187,20 +187,35 @@ function buildPlane(n) {
   const group = new THREE.Group();
   scene.add(group);
   const record = { group, disposables: [], clockPaint: null, video: null };
-  const side = (n % 2 === 0 ? 1 : -1) * (1.1 + rng() * 1.3);
-  const yOff = (rng() - 0.5) * 1.6;
-  const roll = rng();
 
-  if (roll < 0.1) {
+  // the gallery layout (kidzfrmnowhere read): every piece faces the
+  // camera dead-on. Every 4th piece is a HERO — presented centered, big,
+  // straight at you. The rest are the field: a golden-angle scatter
+  // around your flight path, passing at the edges of the frame.
+  const isHero = n % 4 === 0;
+  const roll = rng();
+  let px, py;
+  if (isHero) {
+    px = (rng() - 0.5) * 0.6;
+    py = (rng() - 0.5) * 0.4;
+  } else {
+    const ang = (n % 21) * 2.39996 + rng() * 0.5;
+    const r = 1.8 + rng() * 1.9;
+    px = Math.cos(ang) * r * 1.25;
+    py = Math.sin(ang) * r * 0.55;
+  }
+
+  if (isHero && roll < 0.2) {
+    // the clock, presented like a work
     const { tex, paint } = makeClockTexture();
     record.clockPaint = paint;
     liveClockPaints.add(paint);
     const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true, transparent: true });
     record.disposables.push(tex, mat);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), mat);
-    m.position.set(side * 0.7, yOff, 0);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 3.8), mat);
+    m.position.set(px, py, 0);
     group.add(m);
-  } else if (roll < 0.32 && vidBusy.indexOf(false) >= 0) {
+  } else if (roll < (isHero ? 0.45 : 0.15) && vidBusy.indexOf(false) >= 0) {
     const vi = vidBusy.indexOf(false);
     vidBusy[vi] = true;
     record.video = vi;
@@ -212,20 +227,23 @@ function buildPlane(n) {
     tex.colorSpace = THREE.SRGBColorSpace;
     const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true, transparent: true });
     record.disposables.push(tex, mat);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 4.2), mat);
-    m.position.set(side * 0.7, yOff, 0);
+    const size = isHero ? [5.9, 4.4] : [4.0, 3.0];
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(size[0], size[1]), mat);
+    m.position.set(px, py, 0);
     group.add(m);
     v.play().catch(() => {});
   } else {
     const idx = Math.floor(rng() * manifest.length);
-    const h = [3.6, 4.6, 5.6][Math.floor(rng() * 3)];
+    const h = isHero
+      ? [4.6, 5.4][Math.floor(rng() * 2)]
+      : [2.4, 3.2, 4.0][Math.floor(rng() * 3)];
     texLoader.load(manifest[idx], (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
       const a = tex.image.width / tex.image.height;
       const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true, transparent: true });
       record.disposables.push(tex, mat);
       const m = new THREE.Mesh(new THREE.PlaneGeometry(h * a, h), mat);
-      m.position.set(side, yOff, 0);
+      m.position.set(px, py, 0);
       group.add(m);
     });
   }
