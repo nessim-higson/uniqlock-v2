@@ -4,8 +4,12 @@
 export const ASSETS = 'https://megajerk.github.io/Uniqlock/assets';
 
 // Repo root, derived from this module's location — keeps local asset URLs
-// correct when a page lives in a subdirectory (comps/*).
-export const ROOT = new URL('..', import.meta.url).href;
+// correct when a page lives in a subdirectory (comps/*). Frozen snapshots
+// under versions/ override this so they share the live assets instead of
+// duplicating them.
+export const ROOT = (typeof window !== 'undefined' && window.UQ_ASSET_ROOT)
+  ? window.UQ_ASSET_ROOT
+  : new URL('..', import.meta.url).href;
 
 // colorBySeason["1"] — 24 hour colors, index = hour of day
 export const HOUR_COLORS = [
