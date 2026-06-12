@@ -24,13 +24,14 @@
   .panel.in-right  { animation: inRight 300ms forwards var(--ease-out); }
   .panel.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
   .panel.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
-  .panel.out-top    { animation: outTop 300ms forwards var(--ease-out); }
-  .panel.out-right  { animation: outRight 300ms forwards var(--ease-out); }
-  .panel.out-bottom { animation: outBottom 300ms forwards var(--ease-out); }
-  .panel.out-left   { animation: outLeft 300ms forwards var(--ease-out); }
   .panel.recede {
     transition: transform 700ms var(--ease-out), opacity 700ms var(--ease-out);
     transform: translateZ(-300px);
+    opacity: 0;
+  }
+  .panel.through {
+    transition: transform 650ms var(--ease-out), opacity 650ms var(--ease-out);
+    transform: translateZ(600px);
     opacity: 0;
   }
 
@@ -38,22 +39,30 @@
   @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
   @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
   @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
-  @keyframes outTop    { from { clip-path: inset(0); } to { clip-path: inset(100% 0 0 0); } }
-  @keyframes outRight  { from { clip-path: inset(0); } to { clip-path: inset(0 100% 0 0); } }
-  @keyframes outBottom { from { clip-path: inset(0); } to { clip-path: inset(0 0 100% 0); } }
-  @keyframes outLeft   { from { clip-path: inset(0); } to { clip-path: inset(0 0 0 100%); } }
 
   .clockface { width: 100%; height: 100%; display: flex; align-items: center;
     justify-content: center; font-family: "Uniqlo", "Helvetica Neue", sans-serif;
     font-weight: 700; }
   .clockface .t { font-size: 9cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
 
-  #metro { position: fixed; left: 22px; top: 22px; width: 6vmin; height: 6vmin;
-    z-index: 4; background: #fff; display: flex;
+  #metro { position: fixed; left: 22px; top: 22px; width: 4.2vmin; height: 4.2vmin;
+    z-index: 7; background: #fff; display: flex; cursor: pointer;
     align-items: center; justify-content: center;
     transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
   #metro span { font-family: "Helvetica Neue", Helvetica, sans-serif;
-    font-weight: 700; font-size: 1.6vmin; letter-spacing: 0.04em; color: #111; }
+    font-weight: 700; font-size: 1.1vmin; letter-spacing: 0.04em; color: #111;
+    pointer-events: none; }
+
+  #index { position: absolute; inset: 0; z-index: 6; display: none;
+    background: #000; color: #fff; padding: 14vh 8vw;
+    flex-direction: column; justify-content: center; gap: 0.6vh; }
+  #index.open { display: flex; animation: idxIn 450ms var(--ease-out); }
+  @keyframes idxIn { from { opacity: 0; } to { opacity: 1; } }
+  #index .row { font-weight: 700; font-size: 6.4vmin; letter-spacing: -0.01em;
+    line-height: 1.16; cursor: pointer; width: fit-content; }
+  #index .row:hover { color: #000; background: #fff; }
+  #index .hint { margin-top: 5vh; font-size: 11px; font-weight: 400;
+    letter-spacing: 0.14em; opacity: 0.45; }
 
   #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
@@ -73,16 +82,25 @@
 
 <div id="stage"></div>
 <div id="metro" style="display:none"><span>IAAH</span></div>
+<div id="index">
+  <div class="row">WORK 01</div>
+  <div class="row">WORK 02</div>
+  <div class="row">WORK 03</div>
+  <div class="row">WORK 04</div>
+  <div class="row">ABOUT</div>
+  <div class="row">CONTACT</div>
+  <div class="hint">PLACEHOLDER INDEX — THE BROADCAST CONTINUES BEHIND THIS. CLICK THE BOX TO REJOIN IT, IN SYNC.</div>
+</div>
 <video id="v0" muted playsinline preload="auto" style="display:none"></video>
 <video id="v1" muted playsinline preload="auto" style="display:none"></video>
 <div id="label">COMP 05 — BEAT-CUT GRID · <a href="../">back</a></div>
 <div id="status"></div>
 <div id="overlay">
   <div class="wordmark">BEAT-CUT GRID</div>
-  <div class="prompt">the archive composes itself on the metronome — aspect-true panels
-  butting<br>against each other, receding into depth, the clock visiting. every move
-  on the beat.</div>
-  <div class="prompt">1 / 2 / 3 — density · m mute · click to enter, sound on</div>
+  <div class="prompt">a broadcast, not a slot machine: the show is a pure function of the
+  clock —<br>everyone watching this minute sees the same performance.
+  click the box to step out; it goes on without you.</div>
+  <div class="prompt">m mute · click to enter, sound on</div>
 </div>
 
 <script type="module">
@@ -92,6 +110,7 @@ import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/da
 
 const stage = document.getElementById('stage');
 const metro = document.getElementById('metro');
+const indexEl = document.getElementById('index');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const vids = [document.getElementById('v0'), document.getElementById('v1')];
@@ -99,71 +118,127 @@ const vids = [document.getElementById('v0'), document.getElementById('v1')];
 const conductor = createConductor();
 const music = createMusic(conductor);
 
-// all durations in WHOLE beats — every entrance and exit lands on a tick
-const DENSITY = {
-  1: { durs: [2, 2, 4, 4, 6], name: 'HALF-TIME' },
-  2: { durs: [1, 1, 2, 2, 3], name: 'ON THE BEAT' },
-  3: { durs: [1, 1, 1, 2], name: 'DOUBLE-TIME' },
-};
-let density = 2;
+// ═══════════════════════════════════════════════════
+// THE BROADCAST — like the original UNIQLOCK, the show is synchronized:
+// every composition decision is drawn from a PRNG seeded by the hour and
+// walked forward in absolute time. Two people watching at the same minute
+// (in the same timezone) see the same performance. Reloading changes
+// nothing. The site performs whether anyone watches or not.
+// ═══════════════════════════════════════════════════
 
-// ── pools: stills preloaded ahead so their native aspect is known at
-//    composition time — panels are sized BY the image, never cropping it ──
-let stillPool = [], stillQueue = [];
-const staged = [];
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
 
-function shuffled(list) {
-  const a = [...list];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+let stillPool = [];
+const DURS = [1, 1, 2, 2, 3];
+
+function newWalk(hourIdx) {
+  const rng = mulberry32((hourIdx * 2654435761) >>> 0);
+  return { rng, t: hourIdx * 3600, clockIn: 5 + Math.floor(rng() * 4), recent: [] };
+}
+
+function pickStill(walk) {
+  let idx = Math.floor(walk.rng() * stillPool.length);
+  while (walk.recent.includes(idx)) idx = (idx + 7) % stillPool.length;
+  walk.recent.push(idx);
+  if (walk.recent.length > 5) walk.recent.shift();
+  return idx;
+}
+
+function genSlot(walk) {
+  const { rng } = walk;
+  const isClock = --walk.clockIn <= 0;
+  if (isClock) walk.clockIn = 5 + Math.floor(rng() * 4);
+  const D = isClock ? 2 : DURS[Math.floor(rng() * DURS.length)];
+
+  const desc = { start: walk.t, D, isClock, panels: [] };
+  if (isClock) {
+    desc.full = rng() < 0.12;
+    desc.sideIdx = Math.floor(rng() * 3);
+    desc.posIdx = [Math.floor(rng() * 3), Math.floor(rng() * 3)];
+  } else {
+    const n = [1, 1, 2, 2, 2, 3][Math.floor(rng() * 6)];
+    for (let i = 0; i < n; i++) {
+      desc.panels.push({
+        still: pickStill(walk),
+        clip: i === 0 && rng() < 0.3
+          ? Math.floor(rng() * VIDEOS[timeOfDay(new Date(walk.t * 1000).getHours())].length)
+          : null,
+        hIdx: Math.floor(rng() * 4),
+        xIdx: Math.floor(rng() * 5),
+        // alignment is the magic: weight shared top/bottom edges over center
+        yIdx: [0, 0, 1, 1, 2][Math.floor(rng() * 5)],
+        enter: (i > 0 && D >= 2 && rng() < 0.5) ? 1 : 0,
+      });
+    }
   }
-  return a;
-}
-function nextStillUrl() {
-  if (!stillQueue.length) stillQueue = shuffled(stillPool);
-  return stillQueue.pop();
+  walk.t += D;
+  return desc;
 }
 
-function ensureStaged() {
-  while (staged.length < 8 && stillPool.length) {
-    const img = new Image();
-    const entry = { img, aspect: 4 / 3, ready: false };
-    img.onload = () => {
-      entry.aspect = img.naturalWidth / img.naturalHeight;
-      entry.ready = true;
-    };
-    img.onerror = () => { entry.ready = true; };
-    img.src = nextStillUrl();
-    staged.push(entry);
+let walk = null;
+let queueDescs = [];
+
+function syncWalk(nowSec) {
+  walk = newWalk(Math.floor(nowSec / 3600));
+  let d = genSlot(walk);
+  while (d.start + d.D <= nowSec) {
+    if (Math.floor(walk.t / 3600) !== Math.floor(nowSec / 3600)) walk = newWalk(Math.floor(nowSec / 3600));
+    d = genSlot(walk);
   }
+  // start cleanly at the next slot boundary
+  queueDescs = [d.start > nowSec ? d : genSlot(walk)];
 }
-function takeStill() {
-  const i = staged.findIndex((e) => e.ready);
-  const entry = i >= 0 ? staged.splice(i, 1)[0] : staged.shift();
-  ensureStaged();
+
+function pullDesc() {
+  if (queueDescs.length === 0) queueDescs.push(genSlot(walk));
+  const d = queueDescs.shift();
+  if (queueDescs.length === 0) queueDescs.push(genSlot(walk));
+  return d;
+}
+function peekDesc() {
+  if (queueDescs.length === 0) queueDescs.push(genSlot(walk));
+  return queueDescs[0];
+}
+
+// ── image cache: preload by URL so native aspect is known at show time ──
+const imgCache = new Map();
+function ensureImg(url) {
+  if (imgCache.has(url)) return imgCache.get(url);
+  const entry = { img: new Image(), aspect: 4 / 3, ready: false };
+  entry.img.onload = () => {
+    entry.aspect = entry.img.naturalWidth / entry.img.naturalHeight;
+    entry.ready = true;
+  };
+  entry.img.onerror = () => { entry.ready = true; };
+  entry.img.src = url;
+  imgCache.set(url, entry);
+  if (imgCache.size > 30) imgCache.delete(imgCache.keys().next().value);
   return entry;
 }
 
-let clipQueue = [];
-function nextClipUrl() {
-  if (!clipQueue.length) clipQueue = shuffled(VIDEOS[timeOfDay(new Date().getHours())]);
-  return clipQueue.pop();
-}
 let vidStandby = 0;
 let vidBusy = [false, false];
-function preloadStandby() {
+function preloadClip(url) {
   if (vidBusy[vidStandby]) return;
   const v = vids[vidStandby];
-  v.src = nextClipUrl();
-  v.load();
+  if (v.dataset.url !== url) {
+    v.dataset.url = url;
+    v.src = url;
+    v.load();
+  }
 }
 function claimVideo() {
   const i = vidStandby;
   if (vidBusy[i] || vids[i].readyState < 2) return null;
   vidBusy[i] = true;
   vidStandby = 1 - vidStandby;
-  preloadStandby();
   return vids[i];
 }
 function releaseVideo(v) {
@@ -171,18 +246,32 @@ function releaseVideo(v) {
   if (i >= 0) { v.pause(); vidBusy[i] = false; }
 }
 
-// ── the composer: aspect-true panels that BUTT against each other.
-//    first panel anchors; the rest sit flush on a shared edge, tops and
-//    bottoms deliberately misaligned. black is negative space. ──
-function composeSlot(wantClip) {
-  const VW = innerWidth, VH = innerHeight;
-  const n = [1, 1, 2, 2, 2, 3][Math.floor(Math.random() * 6)];
-  const specs = [];
-  let prev = null;
+function preloadDesc(desc) {
+  for (const p of desc.panels) {
+    ensureImg(stillPool[p.still]);
+    if (p.clip !== null) {
+      preloadClip(VIDEOS[timeOfDay(new Date(desc.start * 1000).getHours())][p.clip]);
+    }
+  }
+}
 
-  for (let i = 0; i < n; i++) {
+// ── compose: deterministic choices, locally adapted to the viewport ──
+function composeFromDesc(desc) {
+  const VW = innerWidth, VH = innerHeight;
+  const specs = [];
+
+  if (desc.isClock) {
+    const m = Math.min(VW, VH);
+    const side = desc.full ? m : m * [0.3, 0.42, 0.55][desc.sideIdx];
+    const xs = [VW * 0.06, (VW - side) / 2, VW - side - VW * 0.06];
+    const ys = [VH * 0.08, (VH - side) / 2, VH - side - VH * 0.08];
+    return [{ x: xs[desc.posIdx[0]], y: ys[desc.posIdx[1]], w: side, h: side, content: { kind: 'clock' }, enter: 0 }];
+  }
+
+  let prev = null;
+  for (const p of desc.panels) {
     let content = null, aspect;
-    if (wantClip && i === 0) {
+    if (p.clip !== null) {
       const v = claimVideo();
       if (v) {
         content = { kind: 'clip', el: v };
@@ -190,37 +279,32 @@ function composeSlot(wantClip) {
       }
     }
     if (!content) {
-      const s = takeStill();
-      if (!s) break;
-      content = { kind: 'still', el: s.img };
-      aspect = s.aspect;
+      const e = ensureImg(stillPool[p.still]);
+      content = { kind: 'still', el: e.img };
+      aspect = e.aspect;
     }
 
-    let h = VH * [0.5, 0.62, 0.8, 1][Math.floor(Math.random() * 4)];
+    let h = VH * [0.5, 0.62, 0.8, 1][p.hIdx];
     let w = h * aspect;
     if (w > VW) { h *= VW / w; w = VW; }
 
     let xPos, yPos;
     if (!prev) {
-      xPos = [0, (VW - w) / 2, VW - w, VW * 0.08, VW * 0.55][Math.floor(Math.random() * 5)];
+      xPos = [0, (VW - w) / 2, VW - w, VW * 0.08, VW * 0.55][p.xIdx];
       xPos = Math.max(0, Math.min(VW - w, xPos));
-      yPos = [0, (VH - h) / 2, VH - h][Math.floor(Math.random() * 3)];
+      yPos = [0, (VH - h) / 2, VH - h][p.yIdx];
     } else {
-      // butt against the previous panel: flush seam, offset alignment
       if (prev.x + prev.w + w <= VW + w * 0.15) xPos = prev.x + prev.w;
       else xPos = prev.x - w;
-      const yOpts = [prev.y, prev.y + prev.h - h, prev.y + prev.h / 2 - h / 2];
-      yPos = yOpts[Math.floor(Math.random() * 3)];
+      yPos = [prev.y, prev.y + prev.h - h, prev.y + prev.h / 2 - h / 2][p.yIdx];
     }
     xPos = Math.max(-w * 0.12, Math.min(VW - w * 0.88, xPos));
     yPos = Math.max(-h * 0.12, Math.min(VH - h * 0.88, yPos));
 
-    const spec = { x: xPos, y: yPos, w, h, content };
+    const spec = { x: xPos, y: yPos, w, h, content, enter: p.enter };
     specs.push(spec);
     prev = spec;
-    // a near-full-width anchor owns the frame — companions would only
-    // bleed offscreen
-    if (i === 0 && w > VW * 0.82) break;
+    if (specs.length === 1 && w > VW * 0.82) break;
   }
   return specs;
 }
@@ -232,30 +316,28 @@ const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
 let dirCount = 0;
 function nextDir() { return DIRECTIONS[dirCount++ % 4]; }
 
-function showPanel(spec) {
+function showPanel(spec, slot) {
   const d = document.createElement('div');
   d.className = 'panel';
   d.style.left = spec.x + 'px';
   d.style.top = spec.y + 'px';
   d.style.width = spec.w + 'px';
   d.style.height = spec.h + 'px';
-  d.dataset.slot = spec.slot;
+  d.dataset.slot = slot;
   spec.el = d;
 
-  if (spec.content.kind === 'clock') {
-    fillClock(d);
-  } else if (spec.content.kind === 'clip') {
+  if (spec.content.kind === 'clock') fillClock(d);
+  else if (spec.content.kind === 'clip') {
     const v = spec.content.el;
     v.style.display = 'block';
     v.currentTime = 0;
     v.play().catch(() => {});
     d.appendChild(v);
   } else {
-    const im = spec.content.el.cloneNode();
-    d.appendChild(im);
+    d.appendChild(spec.content.el.cloneNode());
   }
 
-  if (spec.mode === 'wipe') d.classList.add('in-' + nextDir());
+  d.classList.add('in-' + nextDir());
   stage.appendChild(d);
   livePanels.add(d);
 }
@@ -273,22 +355,10 @@ function removePanel(d) {
 function hidePanel(spec) {
   const d = spec.el;
   if (!d || !d.isConnected) return;
-  if (spec.exit === 'recede') {
-    // shift back in Z — the next composition arrives in front of it
-    d.classList.add('recede');
-    setTimeout(() => removePanel(d), 750);
-  } else if (spec.exit === 'wipe') {
-    d.className = 'panel out-' + nextDir();
-    let done = false;
-    const fin = () => { if (!done) { done = true; removePanel(d); } };
-    d.addEventListener('animationend', fin, { once: true });
-    setTimeout(fin, 400);
-  } else {
-    removePanel(d);
-  }
+  d.classList.add('recede');
+  setTimeout(() => removePanel(d), 750);
 }
 
-// ── the clock interstitial ──
 function fillClock(d) {
   const face = document.createElement('div');
   face.className = 'clockface';
@@ -307,7 +377,7 @@ function paintClock(face, date) {
   face.querySelector('.t').textContent = date.toTimeString().slice(0, 8);
 }
 
-// ── slot engine: phase-space events, everything on whole beats ──
+// ── runtime: phase-space events on the conductor ──
 let events = [];
 function at(phase, prio, fn) {
   events.push({ phase, prio, fn });
@@ -315,7 +385,7 @@ function at(phase, prio, fn) {
 }
 
 let slotCount = 0;
-let nextClockIn = 5 + Math.floor(Math.random() * 4);
+let paused = false;
 
 function sweepStale() {
   for (const d of [...livePanels]) {
@@ -323,48 +393,19 @@ function sweepStale() {
   }
 }
 
-function runSlot(P) {
+function runSlot() {
+  if (paused) return;
+  const desc = pullDesc();
   slotCount++;
   sweepStale();
-  const isClock = --nextClockIn <= 0;
-  if (isClock) nextClockIn = 5 + Math.floor(Math.random() * 4);
+  preloadDesc(peekDesc());
 
-  const durs = DENSITY[density].durs;
-  const D = isClock ? 2 : durs[Math.floor(Math.random() * durs.length)];
-
-  let specs;
-  if (isClock) {
-    // the clock visits like any other panel: small, placed, varied —
-    // full-bleed only as a rare exclamation
-    const VW = innerWidth, VH = innerHeight;
-    const m = Math.min(VW, VH);
-    const side = Math.random() < 0.12 ? m : m * [0.3, 0.42, 0.55][Math.floor(Math.random() * 3)];
-    const xs = [VW * 0.06, (VW - side) / 2, VW - side - VW * 0.06];
-    const ys = [VH * 0.08, (VH - side) / 2, VH - side - VH * 0.08];
-    specs = [{
-      x: xs[Math.floor(Math.random() * 3)],
-      y: ys[Math.floor(Math.random() * 3)],
-      w: side, h: side,
-      content: { kind: 'clock' },
-    }];
-  } else {
-    specs = composeSlot(Math.random() < 0.3);
+  const specs = composeFromDesc(desc);
+  for (const spec of specs) {
+    at(desc.start + spec.enter, 1, () => showPanel(spec, slotCount));
+    at(desc.start + desc.D, 0, () => hidePanel(spec));
   }
-
-  specs.forEach((spec, i) => {
-    spec.slot = slotCount;
-    // one grammar for every panel: mask in on the beat, recede into Z
-    // as the next composition replaces it
-    spec.mode = 'wipe';
-    spec.exit = 'recede';
-    // entrances on whole beats only: anchor on the slot beat, others may
-    // join exactly one beat later (when the slot is long enough)
-    const enter = (i > 0 && D >= 2 && Math.random() < 0.5) ? 1 : 0;
-    at(P + enter, 1, () => showPanel(spec));
-    at(P + D, 0, () => hidePanel(spec));
-  });
-
-  at(P + D, 2, () => runSlot(P + D));
+  at(desc.start + desc.D, 2, runSlot);
 }
 
 function processEvents(p) {
@@ -376,22 +417,46 @@ function processEvents(p) {
 }
 
 function render() {
-  processEvents(conductor.phase());
+  if (!paused) processEvents(conductor.phase());
   requestAnimationFrame(render);
 }
 
-// ── the metronome made visible: the IAAH box turns on every beat ──
+// ── the door: the box is the only interactive thing on the site.
+//    click it and the current composition flies PAST you (z-rush) into a
+//    placeholder index. click again: rejoin the broadcast — in sync,
+//    because it never stopped. ──
+function openIndex() {
+  paused = true;
+  events = [];
+  for (const d of [...livePanels]) {
+    d.classList.add('through');
+    setTimeout(() => removePanel(d), 700);
+  }
+  indexEl.classList.add('open');
+}
+function closeIndex() {
+  indexEl.classList.remove('open');
+  paused = false;
+  syncWalk(conductor.phase());
+  at(peekDesc().start, 2, runSlot);
+}
+metro.addEventListener('click', () => {
+  if (!entered) return;
+  if (paused) closeIndex(); else openIndex();
+});
+
+// ── the metronome made visible ──
 let metroDeg = 0;
 conductor.onBeat((beat) => {
   music.onBeat(beat);
-  if (document.hidden && entered) processEvents(conductor.phase());
+  if (document.hidden && entered && !paused) processEvents(conductor.phase());
   metroDeg += 90;
   metro.style.transform = `rotate(${metroDeg}deg)`;
   for (const face of liveClockFaces) paintClock(face, beat.date);
-  statusEl.textContent = `${DENSITY[density].name} · SLOT ${String(slotCount).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
+  statusEl.textContent = `${paused ? 'INDEX' : 'LIVE'} · SLOT ${String(slotCount).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
 
-// ── entry: visuals immediately, music joins when ready ──
+// ── entry ──
 let entered = false;
 const manifestReady = loadImageryManifest();
 const musicReady = music.load();
@@ -402,12 +467,12 @@ overlay.addEventListener('click', async () => {
   try {
     await conductor.start();
     stillPool = await manifestReady;
-    ensureStaged();
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
     metro.style.display = 'flex';
-    preloadStandby();
-    runSlot(Math.ceil(conductor.phase() + 0.3));
+    syncWalk(conductor.phase());
+    preloadDesc(peekDesc());
+    at(peekDesc().start, 2, runSlot);
     requestAnimationFrame(render);
     musicReady.then(() => music.begin()).catch((err) => {
       console.warn('[beatcut] music failed, running silent:', err);
@@ -424,7 +489,6 @@ overlay.addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   if (!entered) return;
   if (e.key === 'm') music.toggleMute();
-  if (DENSITY[e.key]) density = Number(e.key);
 });
 </script>
 
