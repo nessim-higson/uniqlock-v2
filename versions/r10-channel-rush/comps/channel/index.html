@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 08 — IAAH channel</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
+
+  #stage { position: absolute; inset: 0; perspective: 1200px; background: #000;
+    transition: background 600ms ease, perspective-origin 620ms cubic-bezier(.3, 0, .15, 1); }
+  .panel { position: absolute; overflow: hidden; container-type: size; }
+  .panel img, .panel video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* the composition breathes on the beat: panel contents bob in counterpoint
+     (odd/even panels alternate), retriggered by the tick-a/tick-b flip */
+  #stage.tick-a .panel:not(.recede):nth-child(odd) > *,
+  #stage.tick-b .panel:not(.recede):nth-child(even) > * {
+    animation: bobIn 420ms var(--ease-out);
+  }
+  #stage.tick-a .panel:not(.recede):nth-child(even) > *,
+  #stage.tick-b .panel:not(.recede):nth-child(odd) > * {
+    animation: bobOut 420ms var(--ease-out);
+  }
+  @keyframes bobIn  { 25% { transform: scale(1.022) translateY(-3px); } }
+  @keyframes bobOut { 25% { transform: scale(1.008); } }
+  .panel.in-top    { animation: inTop 300ms forwards var(--ease-out); }
+  .panel.in-right  { animation: inRight 300ms forwards var(--ease-out); }
+  .panel.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
+  .panel.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
+  .panel.recede { transition: transform 700ms var(--ease-out), opacity 700ms var(--ease-out);
+    transform: translateZ(-300px); opacity: 0; }
+  @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+  @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+  @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+  @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+
+  .clockface { width: 100%; height: 100%; display: flex; align-items: center;
+    justify-content: center; font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700; }
+  .clockface .t { font-size: 9cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
+  #metro { position: fixed; left: 22px; top: 22px; width: 4.2vmin; height: 4.2vmin;
+    z-index: 7; background: #fff; display: flex; align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 1.1vmin; letter-spacing: 0.04em; color: #111; }
+
+  #ident { position: absolute; inset: 0; z-index: 6; display: none;
+    background: #000; align-items: center; justify-content: center; }
+  #ident.on { display: flex; }
+  #ident .box { width: 16vmin; height: 16vmin; background: #fff; display: flex;
+    align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #ident .box span { font-weight: 700; font-size: 4vmin; letter-spacing: 0.04em; color: #111; }
+
+  #card { position: absolute; inset: 0; z-index: 6; display: none; width: 100%; height: 100%; }
+  #card.on { display: block; }
+
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 8; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 8; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<canvas id="card"></canvas>
+<div id="ident"><div class="box"><span>IAAH</span></div></div>
+<div id="metro" style="display:none"><span>IAAH</span></div>
+<video id="v0" muted playsinline preload="auto" style="display:none"></video>
+<video id="v1" muted playsinline preload="auto" style="display:none"></video>
+<div id="label">COMP 08 — IAAH CHANNEL · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">IAAH CHANNEL</div>
+  <div class="prompt">a television station, not a website: morning is sparse and white,
+  primetime is dense,<br>4am is a test card with a tone. idents between the shows.
+  the schedule is the tempo system.</div>
+  <div class="prompt">keys: 0 test card · 1 morning · 2 daytime · 3 primetime · L live · m mute</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/data.js';
+
+const stage = document.getElementById('stage');
+const metro = document.getElementById('metro');
+const identEl = document.getElementById('ident');
+const identBox = identEl.querySelector('.box');
+const card = document.getElementById('card');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const vids = [document.getElementById('v0'), document.getElementById('v1')];
+
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+// ═══ the schedule IS the tempo system ═══
+const BLOCKS = {
+  testcard:  { name: 'TEST CARD',  hours: [0, 6] },
+  morning:   { name: 'MORNING',    hours: [6, 11], durs: [4, 6, 6, 8], counts: [1, 1, 1, 2], clipP: 0.15, identEvery: 12, bg: '#f2efe9' },
+  daytime:   { name: 'DAYTIME',    hours: [11, 18], durs: [1, 2, 2, 3], counts: [1, 1, 2, 2, 2, 3], clipP: 0.3, identEvery: 9, bg: '#000' },
+  primetime: { name: 'PRIMETIME',  hours: [18, 24], durs: [1, 1, 2, 2], counts: [2, 2, 3, 3], clipP: 0.45, identEvery: 7, bg: '#000' },
+};
+let previewBlock = null; // key override via 0/1/2/3; null = live schedule
+
+function blockForHour(h) {
+  if (previewBlock) return previewBlock;
+  if (h < 6) return 'testcard';
+  if (h < 11) return 'morning';
+  if (h < 18) return 'daytime';
+  return 'primetime';
+}
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+let stillPool = [];
+let walk = null;
+let queueDescs = [];
+
+function newWalk(hourIdx) {
+  const rng = mulberry32((hourIdx * 2654435761) >>> 0);
+  return { rng, t: hourIdx * 3600, sinceIdent: 0, recent: [] };
+}
+function pickStill(w) {
+  let idx = Math.floor(w.rng() * stillPool.length);
+  while (w.recent.includes(idx)) idx = (idx + 7) % stillPool.length;
+  w.recent.push(idx);
+  if (w.recent.length > 5) w.recent.shift();
+  return idx;
+}
+
+function genSlot(w) {
+  const rng = w.rng;
+  const hour = new Date(w.t * 1000).getHours();
+  const bk = blockForHour(hour);
+  const blk = BLOCKS[bk];
+
+  if (bk === 'testcard') {
+    const desc = { start: w.t, D: 4, kind: 'card' };
+    w.t += 4;
+    return desc;
+  }
+  if (++w.sinceIdent >= blk.identEvery) {
+    w.sinceIdent = 0;
+    const desc = { start: w.t, D: 4, kind: 'ident' };
+    w.t += 4;
+    return desc;
+  }
+  const D = blk.durs[Math.floor(rng() * blk.durs.length)];
+  const desc = { start: w.t, D, kind: 'comp', block: bk, panels: [] };
+  if (rng() < 0.1) {
+    desc.kind = 'clock';
+    desc.full = rng() < 0.12;
+    desc.sideIdx = Math.floor(rng() * 3);
+    desc.posIdx = [Math.floor(rng() * 3), Math.floor(rng() * 3)];
+  } else {
+    const n = blk.counts[Math.floor(rng() * blk.counts.length)];
+    for (let i = 0; i < n; i++) {
+      desc.panels.push({
+        still: pickStill(w),
+        clip: i === 0 && rng() < blk.clipP
+          ? Math.floor(rng() * VIDEOS[timeOfDay(hour)].length) : null,
+        hIdx: Math.floor(rng() * 4),
+        xIdx: Math.floor(rng() * 5),
+        yIdx: [0, 0, 1, 1, 2][Math.floor(rng() * 5)],
+        enter: (i > 0 && D >= 2 && rng() < 0.5) ? 1 : 0,
+      });
+    }
+  }
+  w.t += D;
+  return desc;
+}
+
+function syncWalk(nowSec) {
+  walk = newWalk(Math.floor(nowSec / 3600));
+  let d = genSlot(walk);
+  while (d.start + d.D <= nowSec) {
+    if (Math.floor(walk.t / 3600) !== Math.floor(nowSec / 3600)) walk = newWalk(Math.floor(nowSec / 3600));
+    d = genSlot(walk);
+  }
+  queueDescs = [d.start > nowSec ? d : genSlot(walk)];
+}
+function pullDesc() {
+  if (!queueDescs.length) queueDescs.push(genSlot(walk));
+  const d = queueDescs.shift();
+  if (!queueDescs.length) queueDescs.push(genSlot(walk));
+  return d;
+}
+function peekDesc() {
+  if (!queueDescs.length) queueDescs.push(genSlot(walk));
+  return queueDescs[0];
+}
+
+// ── media ──
+const imgCache = new Map();
+function ensureImg(url) {
+  if (imgCache.has(url)) return imgCache.get(url);
+  const e = { img: new Image(), aspect: 4 / 3, ready: false };
+  e.img.onload = () => { e.aspect = e.img.naturalWidth / e.img.naturalHeight; e.ready = true; };
+  e.img.onerror = () => { e.ready = true; };
+  e.img.src = url;
+  imgCache.set(url, e);
+  if (imgCache.size > 30) imgCache.delete(imgCache.keys().next().value);
+  return e;
+}
+let vidStandby = 0;
+let vidBusy = [false, false];
+function preloadClip(url) {
+  if (vidBusy[vidStandby]) return;
+  const v = vids[vidStandby];
+  if (v.dataset.url !== url) { v.dataset.url = url; v.src = url; v.load(); }
+}
+function claimVideo() {
+  const i = vidStandby;
+  if (vidBusy[i] || vids[i].readyState < 2) return null;
+  vidBusy[i] = true;
+  vidStandby = 1 - vidStandby;
+  return vids[i];
+}
+function releaseVideo(v) {
+  const i = vids.indexOf(v);
+  if (i >= 0) { v.pause(); vidBusy[i] = false; }
+}
+function preloadDesc(desc) {
+  if (!desc.panels) return;
+  for (const p of desc.panels) {
+    ensureImg(stillPool[p.still]);
+    if (p.clip !== null) preloadClip(VIDEOS[timeOfDay(new Date(desc.start * 1000).getHours())][p.clip]);
+  }
+}
+
+// ── composer (aspect-true butting, as the grid) ──
+function composeFromDesc(desc) {
+  const VW = innerWidth, VH = innerHeight;
+  if (desc.kind === 'clock') {
+    const m = Math.min(VW, VH);
+    const side = desc.full ? m : m * [0.3, 0.42, 0.55][desc.sideIdx];
+    const xs = [VW * 0.06, (VW - side) / 2, VW - side - VW * 0.06];
+    const ys = [VH * 0.08, (VH - side) / 2, VH - side - VH * 0.08];
+    return [{ x: xs[desc.posIdx[0]], y: ys[desc.posIdx[1]], w: side, h: side, content: { kind: 'clock' }, enter: 0 }];
+  }
+  const specs = [];
+  let prev = null;
+  for (const p of desc.panels) {
+    let content = null, aspect;
+    if (p.clip !== null) {
+      const v = claimVideo();
+      if (v) {
+        content = { kind: 'clip', el: v };
+        aspect = (v.videoWidth && v.videoHeight) ? v.videoWidth / v.videoHeight : 4 / 3;
+      }
+    }
+    if (!content) {
+      const e = ensureImg(stillPool[p.still]);
+      content = { kind: 'still', el: e.img };
+      aspect = e.aspect;
+    }
+    let h = VH * [0.5, 0.62, 0.8, 1][p.hIdx];
+    let w = h * aspect;
+    if (w > VW) { h *= VW / w; w = VW; }
+    let xPos, yPos;
+    if (!prev) {
+      xPos = Math.max(0, Math.min(VW - w, [0, (VW - w) / 2, VW - w, VW * 0.08, VW * 0.55][p.xIdx]));
+      yPos = [0, (VH - h) / 2, VH - h][p.yIdx];
+    } else {
+      xPos = (prev.x + prev.w + w <= VW + w * 0.15) ? prev.x + prev.w : prev.x - w;
+      yPos = [prev.y, prev.y + prev.h - h, prev.y + prev.h / 2 - h / 2][p.yIdx];
+    }
+    xPos = Math.max(-w * 0.12, Math.min(VW - w * 0.88, xPos));
+    yPos = Math.max(-h * 0.12, Math.min(VH - h * 0.88, yPos));
+    const spec = { x: xPos, y: yPos, w, h, content, enter: p.enter };
+    specs.push(spec);
+    prev = spec;
+    if (specs.length === 1 && w > VW * 0.82) break;
+  }
+  return specs;
+}
+
+// ── panels ──
+const livePanels = new Set();
+const liveClockFaces = new Set();
+const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
+let dirCount = 0;
+function nextDir() { return DIRECTIONS[dirCount++ % 4]; }
+
+function showPanel(spec, slot) {
+  const d = document.createElement('div');
+  d.className = 'panel';
+  d.style.left = spec.x + 'px'; d.style.top = spec.y + 'px';
+  d.style.width = spec.w + 'px'; d.style.height = spec.h + 'px';
+  d.dataset.slot = slot;
+  spec.el = d;
+  if (spec.content.kind === 'clock') fillClock(d);
+  else if (spec.content.kind === 'clip') {
+    const v = spec.content.el;
+    v.style.display = 'block'; v.currentTime = 0; v.play().catch(() => {});
+    d.appendChild(v);
+  } else d.appendChild(spec.content.el.cloneNode());
+  d.classList.add('in-' + nextDir());
+  stage.appendChild(d);
+  livePanels.add(d);
+}
+function removePanel(d) {
+  if (!d || !d.isConnected) return;
+  const v = d.querySelector('video');
+  if (v) { releaseVideo(v); v.style.display = 'none'; document.body.appendChild(v); }
+  const face = d.querySelector('.clockface');
+  if (face) liveClockFaces.delete(face);
+  d.remove();
+  livePanels.delete(d);
+}
+function hidePanel(spec) {
+  const d = spec.el;
+  if (!d || !d.isConnected) return;
+  d.classList.add('recede');
+  setTimeout(() => removePanel(d), 750);
+}
+function fillClock(d) {
+  const face = document.createElement('div');
+  face.className = 'clockface';
+  const t = document.createElement('div');
+  t.className = 't';
+  face.appendChild(t);
+  d.appendChild(face);
+  liveClockFaces.add(face);
+  paintClock(face, new Date());
+}
+function paintClock(face, date) {
+  const [r, g, b] = HOUR_COLORS[date.getHours()];
+  const invert = date.getSeconds() % 2 === 1;
+  face.style.background = invert ? '#fff' : `rgb(${r},${g},${b})`;
+  face.style.color = invert ? `rgb(${r},${g},${b})` : '#fff';
+  face.querySelector('.t').textContent = date.toTimeString().slice(0, 8);
+}
+
+// ── test card ──
+let tone = null;
+function paintCard(date) {
+  const VW = innerWidth, VH = innerHeight;
+  card.width = VW; card.height = VH;
+  const g = card.getContext('2d');
+  const bw = VW / 8;
+  for (let i = 0; i < 8; i++) {
+    const [r, gr, b] = HOUR_COLORS[(i * 3) % 24];
+    g.fillStyle = `rgb(${r},${gr},${b})`;
+    g.fillRect(i * bw, 0, bw + 1, VH);
+  }
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.fillRect(0, VH * 0.62, VW, VH * 0.38);
+  const boxW = Math.min(VW, VH) * 0.42;
+  g.fillStyle = '#fff';
+  g.fillRect((VW - boxW) / 2, VH * 0.30, boxW, boxW * 0.5);
+  g.fillStyle = '#111';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = `700 ${boxW * 0.16}px "Helvetica Neue", sans-serif`;
+  g.fillText('IAAH', VW / 2, VH * 0.30 + boxW * 0.16);
+  g.font = `700 ${boxW * 0.11}px Uniqlo, "Helvetica Neue", sans-serif`;
+  g.fillText(date.toTimeString().slice(0, 8), VW / 2, VH * 0.30 + boxW * 0.35);
+  g.fillStyle = '#fff';
+  g.font = `400 ${Math.max(11, VH * 0.016)}px "Helvetica Neue", sans-serif`;
+  g.fillText('PROGRAMMING RESUMES 06:00', VW / 2, VH * 0.8);
+}
+function setTone(on) {
+  if (on && !tone) {
+    const o = conductor.ctx.createOscillator();
+    o.frequency.value = 220;
+    const g = conductor.ctx.createGain();
+    g.gain.value = 0.012;
+    o.connect(g); g.connect(conductor.ctx.destination);
+    o.start();
+    tone = { o, g };
+  } else if (!on && tone) {
+    tone.o.stop();
+    tone = null;
+  }
+}
+
+// ── runtime ──
+let events = [];
+function at(phase, prio, fn) {
+  events.push({ phase, prio, fn });
+  events.sort((a, b) => a.phase - b.phase || a.prio - b.prio);
+}
+let slotCount = 0;
+let mode = 'comp'; // comp | ident | card
+let musicDucked = false;
+
+function setMode(m) {
+  if (m === mode) return;
+  mode = m;
+  identEl.classList.toggle('on', m === 'ident');
+  card.classList.toggle('on', m === 'card');
+  const wantDuck = m === 'card';
+  if (wantDuck !== musicDucked) { music.toggleMute(); musicDucked = wantDuck; }
+  setTone(m === 'card');
+}
+
+function sweepStale() {
+  for (const d of [...livePanels]) {
+    if (slotCount - Number(d.dataset.slot || 0) >= 2) removePanel(d);
+  }
+}
+
+function runSlot() {
+  const desc = pullDesc();
+  slotCount++;
+  sweepStale();
+  preloadDesc(peekDesc());
+
+  if (desc.kind === 'ident') {
+    setMode('ident');
+    for (const d of [...livePanels]) removePanel(d);
+  } else if (desc.kind === 'card') {
+    setMode('card');
+    for (const d of [...livePanels]) removePanel(d);
+  } else {
+    setMode('comp');
+    stage.style.background = BLOCKS[desc.block || blockForHour(new Date(desc.start * 1000).getHours())]?.bg || '#000';
+    const specs = composeFromDesc(desc);
+    for (const spec of specs) {
+      at(desc.start + spec.enter, 1, () => showPanel(spec, slotCount));
+      at(desc.start + desc.D, 0, () => hidePanel(spec));
+    }
+  }
+  at(desc.start + desc.D, 2, runSlot);
+}
+
+function processEvents(p) {
+  while (events.length && p >= events[0].phase) {
+    const e = events.shift();
+    if (p - e.phase > 2 && e.prio !== 2) continue;
+    e.fn();
+  }
+}
+
+// debug handle
+window.__ch = () => ({
+  mode, slotCount,
+  eventQueue: events.map((e) => `${(e.phase % 1000).toFixed(1)}/p${e.prio}`).slice(0, 6),
+  nextKinds: queueDescs.map((d) => `${d.kind}@${d.start % 1000}+${d.D}`),
+  phase: (conductor.phase() % 1000).toFixed(1),
+});
+function render() {
+  processEvents(conductor.phase());
+  requestAnimationFrame(render);
+}
+
+let metroDeg = 0, identDeg = 0;
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  // pump on every beat, not just when document.hidden: occluded windows
+  // throttle rAF without reporting hidden, which stalled the slot chain
+  if (entered) processEvents(conductor.phase());
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+
+  // the metronome moves the room: panels bob in counterpoint, the whole
+  // depth space leans a step left/right on alternate beats
+  const even = beat.n % 2 === 0;
+  stage.classList.toggle('tick-a', even);
+  stage.classList.toggle('tick-b', !even);
+  stage.style.perspectiveOrigin = `${50 + (even ? 1.8 : -1.8)}% ${50 + (even ? -1 : 1)}%`;
+  if (mode === 'ident') {
+    identDeg += 90;
+    identBox.style.transform = `rotate(${identDeg}deg)`;
+  }
+  if (mode === 'card') paintCard(beat.date);
+  for (const face of liveClockFaces) paintClock(face, beat.date);
+  const blockName = previewBlock ? BLOCKS[previewBlock].name + ' (PREVIEW)' : BLOCKS[blockForHour(beat.date.getHours())].name;
+  statusEl.textContent = `${blockName} · ${mode.toUpperCase()} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+// ── entry ──
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+
+function restartSchedule() {
+  events = [];
+  for (const d of [...livePanels]) removePanel(d);
+  syncWalk(conductor.phase());
+  at(peekDesc().start, 2, runSlot);
+}
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    stillPool = await manifestReady;
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    metro.style.display = 'flex';
+    restartSchedule();
+    requestAnimationFrame(render);
+    musicReady.then(() => { if (!musicDucked) music.begin(); else { music.begin(); } }).catch((err) => {
+      console.warn('[channel] music failed, running silent:', err);
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!entered) return;
+  if (e.key === 'm') music.toggleMute();
+  const map = { 0: 'testcard', 1: 'morning', 2: 'daytime', 3: 'primetime' };
+  if (map[e.key]) { previewBlock = map[e.key]; restartSchedule(); }
+  if (e.key === 'l' || e.key === 'L') { previewBlock = null; restartSchedule(); }
+});
+</script>
+
+</body>
+</html>
