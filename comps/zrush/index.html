@@ -244,19 +244,28 @@ conductor.onBeat((beat) => {
 });
 
 let entered = false;
-const ready = Promise.all([music.load(), loadImageryManifest()]);
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
 
 overlay.addEventListener('click', async () => {
   if (entered) return;
   entered = true;
-  overlay.classList.add('leaving');
-  await conductor.start();
-  const [, manifest] = await ready;
-  pool = manifest;
-  music.begin();
-  buildSlides();
-  requestAnimationFrame(render);
-  setTimeout(() => overlay.remove(), 600);
+  try {
+    await conductor.start();
+    pool = await manifestReady;
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    buildSlides();
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch((err) => {
+      console.warn('[zrush] music failed, running silent:', err);
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
 });
 
 document.addEventListener('keydown', (e) => {

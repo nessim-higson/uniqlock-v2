@@ -35,14 +35,13 @@ overlay.addEventListener('click', async () => {
 
   await conductor.start();
   clips.begin(new Date().getHours());
-  try {
-    await musicReady;
-    music.begin();
-  } catch (err) {
-    console.warn('[uq] music failed to load, running silent:', err);
-  }
-
   setTimeout(() => overlay.remove(), 600);
+
+  // never block the clock on the soundtrack download — it joins when ready
+  musicReady.then(() => music.begin()).catch((err) => {
+    console.warn('[uq] music failed to load, running silent:', err);
+    document.getElementById('muteHint').textContent = 'music failed — running silent';
+  });
 });
 
 document.addEventListener('keydown', (e) => {

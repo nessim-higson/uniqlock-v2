@@ -116,10 +116,11 @@ overlay.addEventListener('click', async () => {
   entered = true;
   overlay.classList.add('leaving');
   await conductor.start();
-  await musicReady;
-  music.begin();
   requestAnimationFrame(render);
   setTimeout(() => overlay.remove(), 600);
+  musicReady.then(() => music.begin()).catch((err) => {
+    console.warn('[type] music failed, running silent:', err);
+  });
 });
 
 document.addEventListener('keydown', (e) => {

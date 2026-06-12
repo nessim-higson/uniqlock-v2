@@ -321,22 +321,33 @@ conductor.onBeat((beat) => {
   statusEl.textContent = `${DENSITY[density].name} · SLOT ${String(slotCount).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
 
-// ── entry ──
+// ── entry: visuals start immediately; the music (4.7MB) joins the moment
+// it's downloaded and decoded. Never block the piece on the soundtrack. ──
 let entered = false;
-const ready = Promise.all([music.load(), loadImageryManifest()]);
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
 
 overlay.addEventListener('click', async () => {
   if (entered) return;
   entered = true;
-  overlay.classList.add('leaving');
-  await conductor.start();
-  const [, manifest] = await ready;
-  stillPool = manifest;
-  music.begin();
-  preloadStandby();
-  runSlot(Math.ceil(conductor.phase() + 0.3));
-  requestAnimationFrame(render);
-  setTimeout(() => overlay.remove(), 600);
+  try {
+    await conductor.start();
+    stillPool = await manifestReady;
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    preloadStandby();
+    runSlot(Math.ceil(conductor.phase() + 0.3));
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch((err) => {
+      console.warn('[beatcut] music failed, running silent:', err);
+      statusEl.textContent = 'music failed — running silent';
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
 });
 
 document.addEventListener('keydown', (e) => {
