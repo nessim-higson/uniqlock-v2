@@ -46,14 +46,14 @@
   .clockface { width: 100%; height: 100%; display: flex; align-items: center;
     justify-content: center; font-family: "Uniqlo", "Helvetica Neue", sans-serif;
     font-weight: 700; }
-  .clockface .t { font-size: 14cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+  .clockface .t { font-size: 9cqmin; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
 
-  #metro { position: fixed; left: 50%; top: 50%; width: 12vmin; height: 12vmin;
-    margin: -6vmin 0 0 -6vmin; z-index: 4; background: #fff; display: flex;
+  #metro { position: fixed; left: 22px; top: 22px; width: 6vmin; height: 6vmin;
+    z-index: 4; background: #fff; display: flex;
     align-items: center; justify-content: center;
-    transition: transform 160ms var(--ease-out); }
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
   #metro span { font-family: "Helvetica Neue", Helvetica, sans-serif;
-    font-weight: 700; font-size: 3.2vmin; letter-spacing: 0.04em; color: #111; }
+    font-weight: 700; font-size: 1.6vmin; letter-spacing: 0.04em; color: #111; }
 
   #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
@@ -101,9 +101,9 @@ const music = createMusic(conductor);
 
 // all durations in WHOLE beats — every entrance and exit lands on a tick
 const DENSITY = {
-  1: { durs: [2, 4, 4, 6, 8], name: 'HALF-TIME' },
-  2: { durs: [1, 2, 2, 3, 4], name: 'ON THE BEAT' },
-  3: { durs: [1, 1, 2, 2], name: 'DOUBLE-TIME' },
+  1: { durs: [2, 2, 4, 4, 6], name: 'HALF-TIME' },
+  2: { durs: [1, 1, 2, 2, 3], name: 'ON THE BEAT' },
+  3: { durs: [1, 1, 1, 2], name: 'DOUBLE-TIME' },
 };
 let density = 2;
 
@@ -334,10 +334,17 @@ function runSlot(P) {
 
   let specs;
   if (isClock) {
+    // the clock visits like any other panel: small, placed, varied —
+    // full-bleed only as a rare exclamation
     const VW = innerWidth, VH = innerHeight;
-    const side = Math.random() < 0.6 ? Math.min(VW, VH) : Math.min(VW, VH) * 0.55;
+    const m = Math.min(VW, VH);
+    const side = Math.random() < 0.12 ? m : m * [0.3, 0.42, 0.55][Math.floor(Math.random() * 3)];
+    const xs = [VW * 0.06, (VW - side) / 2, VW - side - VW * 0.06];
+    const ys = [VH * 0.08, (VH - side) / 2, VH - side - VH * 0.08];
     specs = [{
-      x: (VW - side) / 2, y: (VH - side) / 2, w: side, h: side,
+      x: xs[Math.floor(Math.random() * 3)],
+      y: ys[Math.floor(Math.random() * 3)],
+      w: side, h: side,
       content: { kind: 'clock' },
     }];
   } else {
@@ -346,8 +353,10 @@ function runSlot(P) {
 
   specs.forEach((spec, i) => {
     spec.slot = slotCount;
-    spec.mode = Math.random() < 0.3 ? 'cut' : 'wipe';
-    spec.exit = isClock ? 'wipe' : (Math.random() < 0.3 ? 'recede' : Math.random() < 0.6 ? 'wipe' : 'cut');
+    // one grammar for every panel: mask in on the beat, recede into Z
+    // as the next composition replaces it
+    spec.mode = 'wipe';
+    spec.exit = 'recede';
     // entrances on whole beats only: anchor on the slot beat, others may
     // join exactly one beat later (when the slot is long enough)
     const enter = (i > 0 && D >= 2 && Math.random() < 0.5) ? 1 : 0;
