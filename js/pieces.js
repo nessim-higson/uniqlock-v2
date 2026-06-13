@@ -1,43 +1,42 @@
-// The user's own video pieces. Currently the NEVVERLAND reel, sliced into
-// its measured shots (frame-difference analysis). Each shot is a clip;
-// a reel-backed <video> loops within its shot so it keeps moving for as
-// long as it's held on screen. Drop more reels in assets/reel/ and add
-// them here to widen the pool.
+// The user's own video pieces. Currently the NEVVERLAND reel. Rather than
+// slicing it into short shots (which had to loop to fill a hold and read as
+// an "odd repeat"), we play CONTINUOUS segments — a clip starts somewhere in
+// the reel and plays forward for its whole hold without ever looping, so the
+// motion never visibly repeats. Drop more reels in assets/reel/ and add them
+// to REELS to widen the pool.
 
 import { ROOT } from './data.js';
 
-export const REEL = ROOT + 'assets/reel/nevverland.m4v';
-
-// [start, duration] — the reel's real cuts (stutter shots dropped)
-export const SHOTS = [
-  [0.00, 1.30], [1.30, 2.33], [3.63, 1.37], [5.80, 1.63],
-  [7.43, 1.64], [9.07, 1.30], [10.37, 2.50], [12.87, 1.31],
+export const REELS = [
+  { url: ROOT + 'assets/reel/nevverland.m4v', dur: 14.18 },
 ];
 
-export function makeReelVideo() {
+export function makeReelVideo(reelIdx = 0) {
+  const reel = REELS[reelIdx];
   const v = document.createElement('video');
   v.muted = true;
   v.playsInline = true;
   v.preload = 'auto';
-  v.src = REEL;
+  v.src = reel.url;
+  v.dataset.dur = reel.dur;
   v.load();
   return v;
 }
 
-// Play a shot and loop within its bounds (so a 1.3s shot still fills an
-// 8-beat hold without ever cutting to the next shot).
-export function playShot(v, shotIdx) {
-  const shot = SHOTS[((shotIdx % SHOTS.length) + SHOTS.length) % SHOTS.length];
-  const start = shot[0] + 0.03;
-  const end = shot[0] + shot[1] - 0.06;
-  v.dataset.s = start;
-  v.dataset.e = end;
-  const seek = () => { v.currentTime = start; v.play().catch(() => {}); };
-  if (v.readyState >= 1) seek();
-  else v.addEventListener('loadedmetadata', seek, { once: true });
-  v.ontimeupdate = () => {
-    if (v.currentTime >= +v.dataset.e || v.currentTime < +v.dataset.s - 0.15) {
-      v.currentTime = +v.dataset.s;
-    }
-  };
+// Deterministic start time so a `holdSec`-long clip fits before the reel ends.
+export function startFor(seedFloat, holdSec, reelIdx = 0) {
+  const f = ((seedFloat % 1) + 1) % 1;
+  return f * Math.max(0.1, REELS[reelIdx].dur - holdSec);
+}
+
+// Play forward from `start`, no looping. Only wraps if it runs off the very
+// end of the reel (shouldn't happen if start was chosen with startFor).
+export function playFrom(v, start) {
+  const dur = +v.dataset.dur || 14;
+  const s = Math.max(0, Math.min(dur - 0.2, start));
+  v.dataset.s = s;
+  const go = () => { try { v.currentTime = s; } catch (e) { /* not seekable yet */ } v.play().catch(() => {}); };
+  if (v.readyState >= 1) go();
+  else v.addEventListener('loadedmetadata', go, { once: true });
+  v.ontimeupdate = () => { if (v.currentTime >= dur - 0.12) v.currentTime = +v.dataset.s; };
 }

@@ -69,7 +69,7 @@
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
 import { loadImageryManifest } from '../../js/data.js';
-import { SHOTS, makeReelVideo, playShot } from '../../js/pieces.js';
+import { makeReelVideo, playFrom, startFor } from '../../js/pieces.js';
 
 const stage = document.getElementById('stage');
 const clockEl = document.getElementById('clock');
@@ -102,7 +102,7 @@ function eventAt(n) {
   return { change: false }; // beats 3,4 — the clip holds
 }
 function stillUrl(ci) { return pool[Math.floor((((ci) * GOLDEN) % 1 + 1) % 1 * pool.length)]; }
-function shotIdx(ci) { return Math.floor((((ci) * GOLD2) % 1 + 1) % 1 * SHOTS.length); }
+function segStart(ci) { return startFor(ci * GOLD2, 3); } // continuous 3s clip segment
 
 const reel = makeReelVideo();
 const DIRS = ['top', 'right', 'bottom', 'left'];
@@ -120,7 +120,7 @@ function showChange(n, info) {
   layer.className = 'layer in-' + DIRS[((n % 4) + 4) % 4];
   if (info.kind === 'clip') {
     reel.style.display = 'block';
-    playShot(reel, shotIdx(info.ci));
+    playFrom(reel, segStart(info.ci));
     layer.appendChild(reel);
   } else {
     layer.appendChild(img(stillUrl(info.ci)).cloneNode());

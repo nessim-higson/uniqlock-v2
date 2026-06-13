@@ -17,14 +17,14 @@
   #stage { position: absolute; inset: 0; background: #000; }
   .cell { position: absolute; overflow: hidden; background: #000; }
   .cell img, .cell video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .cell.in-top    { animation: inTop 280ms forwards var(--ease-out); }
-  .cell.in-right  { animation: inRight 280ms forwards var(--ease-out); }
-  .cell.in-bottom { animation: inBottom 280ms forwards var(--ease-out); }
-  .cell.in-left   { animation: inLeft 280ms forwards var(--ease-out); }
-  .cell.out-top    { animation: outTop 280ms forwards var(--ease-out); }
-  .cell.out-right  { animation: outRight 280ms forwards var(--ease-out); }
-  .cell.out-bottom { animation: outBottom 280ms forwards var(--ease-out); }
-  .cell.out-left   { animation: outLeft 280ms forwards var(--ease-out); }
+  .cell.in-top    { animation: inTop 340ms forwards var(--ease-out); }
+  .cell.in-right  { animation: inRight 340ms forwards var(--ease-out); }
+  .cell.in-bottom { animation: inBottom 340ms forwards var(--ease-out); }
+  .cell.in-left   { animation: inLeft 340ms forwards var(--ease-out); }
+  .cell.out-top    { animation: outTop 340ms forwards var(--ease-out); }
+  .cell.out-right  { animation: outRight 340ms forwards var(--ease-out); }
+  .cell.out-bottom { animation: outBottom 340ms forwards var(--ease-out); }
+  .cell.out-left   { animation: outLeft 340ms forwards var(--ease-out); }
   @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
   @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
   @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
@@ -77,7 +77,7 @@
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
 import { loadImageryManifest } from '../../js/data.js';
-import { SHOTS, makeReelVideo, playShot } from '../../js/pieces.js';
+import { makeReelVideo, playFrom, startFor } from '../../js/pieces.js';
 
 const stage = document.getElementById('stage');
 const clockEl = document.getElementById('clock');
@@ -92,18 +92,21 @@ const music = createMusic(conductor);
 // staggered by an offset so transitions land on different beats. Two slots
 // are video and never gap, so something is always moving. Every decision
 // is a pure function of the beat serial: broadcast-identical. ═══
+// At most FOUR elements: one video hero that's always on (motion never
+// stops, swaps to a fresh 5s segment every 5 beats) plus three stills that
+// cycle with generous gaps, staggered so wipes land one at a time and read
+// clearly. Usually 2-3 on screen, max 4.
 const SLOTS = [
   // x, y, w, h (fractions) · kind · hold · gap · offset
-  { x: 0.00, y: 0.000, w: 1.00, h: 0.28, kind: 'video', hold: 8, gap: 0, off: 0 },
-  { x: 0.00, y: 0.295, w: 0.52, h: 0.30, kind: 'still', hold: 5, gap: 1, off: 1 },
-  { x: 0.535, y: 0.295, w: 0.465, h: 0.185, kind: 'still', hold: 4, gap: 2, off: 4 },
-  { x: 0.535, y: 0.495, w: 0.465, h: 0.235, kind: 'video', hold: 6, gap: 0, off: 3 },
-  { x: 0.00, y: 0.610, w: 0.52, h: 0.245, kind: 'still', hold: 6, gap: 1, off: 2 },
-  { x: 0.00, y: 0.870, w: 1.00, h: 0.130, kind: 'still', hold: 7, gap: 2, off: 5 },
+  { x: 0.00, y: 0.000, w: 1.00, h: 0.40, kind: 'video', hold: 5, gap: 0, off: 0 },
+  { x: 0.00, y: 0.420, w: 0.56, h: 0.27, kind: 'still', hold: 3, gap: 3, off: 1 },
+  { x: 0.585, y: 0.420, w: 0.415, h: 0.22, kind: 'still', hold: 4, gap: 4, off: 4 },
+  { x: 0.00, y: 0.710, w: 1.00, h: 0.29, kind: 'still', hold: 3, gap: 4, off: 2 },
 ];
 const DIRS = ['top', 'right', 'bottom', 'left'];
 const GOLD_S = 0.6180339887498949;
 const GOLD_V = 0.7548776662466927;
+const VIDEO_HOLD_SEC = 5;
 
 let pool = [];
 const cache = new Map();
@@ -115,9 +118,8 @@ function stillFor(s, ci) {
   const f = (((s * 13 + ci) * GOLD_S) % 1 + 1) % 1;
   return pool[Math.floor(f * pool.length)];
 }
-function shotFor(s, ci) {
-  const f = (((s * 7 + ci) * GOLD_V) % 1 + 1) % 1;
-  return Math.floor(f * SHOTS.length);
+function segStartFor(s, ci) {
+  return startFor((s * 7 + ci) * GOLD_V, VIDEO_HOLD_SEC);
 }
 
 // one reel-backed video element per video slot, reused across its cycles
@@ -160,7 +162,7 @@ function spawn(s, ci) {
   if (def.kind === 'video') {
     const v = slotVideo[s];
     v.style.display = 'block';
-    playShot(v, shotFor(s, ci));
+    playFrom(v, segStartFor(s, ci));
     cell.appendChild(v);
   } else {
     const im = img(stillFor(s, ci)).cloneNode();
