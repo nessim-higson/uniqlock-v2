@@ -16,7 +16,7 @@
   :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
   #stage { position: absolute; inset: 0; }
   .layer { position: absolute; inset: 0; }
-  .layer img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .layer img, .layer video { width: 100%; height: 100%; object-fit: cover; display: block; }
   .layer.in-top    { animation: inTop 300ms forwards var(--ease-out); }
   .layer.in-right  { animation: inRight 300ms forwards var(--ease-out); }
   .layer.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
@@ -54,6 +54,8 @@
 <body>
 
 <div id="stage"></div>
+<video id="v0" muted playsinline preload="auto" style="display:none"></video>
+<video id="v1" muted playsinline preload="auto" style="display:none"></video>
 <div id="metro" style="display:none"><span>IAAH</span></div>
 <div id="clock">00:00:00</div>
 <div id="label">COMP 12 — SWIPE · <a href="../">back</a></div>
@@ -61,20 +63,21 @@
 <div id="overlay">
   <div class="wordmark">SWIPE</div>
   <div class="prompt">the original mechanic, turned on the archive: time small and centered,<br>
-  a different work swiping in from a new direction on every beat.</div>
+  a different work — still or clip — swiping in from a new direction on every beat.</div>
   <div class="prompt">m mute · click to enter, sound on</div>
 </div>
 
 <script type="module">
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
-import { loadImageryManifest } from '../../js/data.js';
+import { loadImageryManifest, VIDEOS, timeOfDay } from '../../js/data.js';
 
 const stage = document.getElementById('stage');
 const clockEl = document.getElementById('clock');
 const metro = document.getElementById('metro');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
+const vids = [document.getElementById('v0'), document.getElementById('v1')];
 const conductor = createConductor();
 const music = createMusic(conductor);
 
@@ -94,18 +97,71 @@ function urlFor(n) {
   return pool[Math.floor(f * pool.length)];
 }
 
+// ── clips: every 3rd beat is a dance clip, deterministic. Two pooled video
+// elements alternate; the next clip beat is always known, so its clip is
+// preloaded ~3 beats (3s) ahead and ready when its beat lands. ──
+const CLIP_EVERY = 3;
+const GOLD2 = 0.7548776662466927;
+const isClipBeat = (n) => (((n % CLIP_EVERY) + CLIP_EVERY) % CLIP_EVERY) === 1;
+function clipUrlFor(n) {
+  const list = VIDEOS[timeOfDay(new Date(conductor.phase() * 1000).getHours())];
+  const f = ((n * GOLD2) % 1 + 1) % 1;
+  return list[Math.floor(f * list.length)];
+}
+let vStandby = 0;
+const vBusy = [false, false];
+function preloadClip(url) {
+  const v = vids[vStandby];
+  if (!vBusy[vStandby] && v.dataset.url !== url) { v.dataset.url = url; v.src = url; v.load(); }
+}
+function claimVideo() {
+  const i = vStandby;
+  if (vBusy[i] || vids[i].readyState < 2) return null;
+  vBusy[i] = true;
+  vStandby = 1 - vStandby;
+  return vids[i];
+}
+function freeVideo(v) {
+  const i = vids.indexOf(v);
+  if (i < 0) return;
+  v.pause();
+  v.style.display = 'none';
+  document.body.appendChild(v); // detach from the removed layer, keep for reuse
+  vBusy[i] = false;
+}
+function nextClipBeat(n) { let k = n + 1; while (!isClipBeat(k)) k++; return k; }
+
 const DIRS = ['top', 'right', 'bottom', 'left'];
 let shownBeat = -1;
 let layers = [];
+
+function removeLayer(layer) {
+  const v = layer.querySelector('video');
+  if (v) freeVideo(v);
+  layer.remove();
+}
 
 function showBeat(n) {
   shownBeat = n;
   const layer = document.createElement('div');
   layer.className = 'layer in-' + DIRS[((n % 4) + 4) % 4];
-  layer.appendChild(img(urlFor(n)).cloneNode());
+
+  let useVideo = null;
+  if (isClipBeat(n)) useVideo = claimVideo(); // null if not ready → still fallback
+  if (useVideo) {
+    useVideo.style.display = 'block';
+    useVideo.currentTime = 0;
+    useVideo.play().catch(() => {});
+    layer.appendChild(useVideo);
+  } else {
+    layer.appendChild(img(urlFor(n)).cloneNode());
+  }
   stage.appendChild(layer);
   layers.push(layer);
-  while (layers.length > 2) layers.shift().remove();
+  while (layers.length > 2) removeLayer(layers.shift());
+
+  // queue the next clip onto the standby element, well ahead of its beat
+  preloadClip(clipUrlFor(nextClipBeat(n)));
 }
 
 function render() {
@@ -141,6 +197,7 @@ overlay.addEventListener('click', async () => {
     // preload the entire pool up front (40 images) so no beat ever waits
     // on a decode — the other source of the "weird delay"
     pool.forEach(img);
+    preloadClip(clipUrlFor(nextClipBeat(Math.floor(conductor.phase()))));
     metro.style.display = 'flex';
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
