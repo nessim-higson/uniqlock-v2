@@ -7,50 +7,94 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
-    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+    font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
   :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
   #stage { position: absolute; inset: 0; background: #000; }
   .layer { position: absolute; inset: 0; }
-  .layer .ph { position: absolute; overflow: hidden; }
-  .layer img { width: 100%; height: 100%; object-fit: cover; display: block;
-    transform: scale(1); }
-  .layer.in-top    { animation: inTop 300ms forwards var(--ease-out); }
-  .layer.in-right  { animation: inRight 300ms forwards var(--ease-out); }
-  .layer.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
-  .layer.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
+  .layer img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .layer.in-top    { animation: inTop 260ms forwards var(--ease-out); }
+  .layer.in-right  { animation: inRight 260ms forwards var(--ease-out); }
+  .layer.in-bottom { animation: inBottom 260ms forwards var(--ease-out); }
+  .layer.in-left   { animation: inLeft 260ms forwards var(--ease-out); }
   @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
   @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
   @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
   @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
-  .card { position: absolute; inset: 0; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 1.6vmin; background: #000; color: #fff; }
-  .card .k { font-size: 11px; letter-spacing: 0.34em; opacity: 0.5; font-weight: 400; }
-  .card .t { font-size: 7vmin; font-weight: 700; letter-spacing: 0.16em; }
-  .card .s { font-size: 1.7vmin; letter-spacing: 0.22em; opacity: 0.65; }
-  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+
+  /* ── metronome indicators — all hidden, body.m-N shows one ── */
+  .metro { position: fixed; z-index: 6; pointer-events: none; display: none; }
+  body.m-1 #pendulum, body.m-2 #seq, body.m-3 #pulse,
+  body.m-4 #edge, body.m-5 #beatbox { display: block; }
+
+  /* 1 — pendulum: a literal metronome wand */
+  #pendulum { left: 50%; bottom: 4vmin; width: 2px; height: 22vmin;
+    margin-left: -1px; transform-origin: bottom center; }
+  #pendulum .arm { position: absolute; inset: 0; background: rgba(255,255,255,0.85); }
+  #pendulum .bob { position: absolute; top: 14%; left: 50%; width: 2.6vmin; height: 2.6vmin;
+    margin-left: -1.3vmin; border-radius: 50%; background: #fff; }
+  #pendulum .base { position: absolute; bottom: -1.4vmin; left: 50%; width: 6vmin; height: 1.4vmin;
+    margin-left: -3vmin; background: rgba(255,255,255,0.6); }
+
+  /* 2 — sequencer: a bar of beat cells with a playhead */
+  #seq { left: 50%; bottom: 4vmin; transform: translateX(-50%);
+    display: flex; gap: 0.8vmin; }
+  #seq .cell { width: 3.4vmin; height: 0.7vmin; background: rgba(255,255,255,0.22); }
+  #seq .cell.on { background: #fff; }
+  #seq .cell.bar { height: 1.1vmin; }
+
+  /* 3 — pulse ring: a felt thump at center */
+  #pulse { left: 50%; top: 50%; width: 26vmin; height: 26vmin; margin: -13vmin 0 0 -13vmin; }
+  #pulse .ring { position: absolute; inset: 0; border: 1px solid rgba(255,255,255,0.55);
+    border-radius: 50%; }
+  body.m-3 #pulse .ring { animation: none; }
+  .thump { animation: thump 600ms var(--ease-out); }
+  @keyframes thump { 0% { transform: scale(0.86); opacity: 0.9; } 100% { transform: scale(1.18); opacity: 0; } }
+
+  /* 4 — edge breathe: the frame itself pulses */
+  #edge { inset: 0; }
+  #edge .b { position: absolute; inset: 1.2vmin; border: 1px solid rgba(255,255,255,0); }
+  .edgeflash { animation: edgeflash 500ms ease-out; }
+  @keyframes edgeflash { 0% { border-color: rgba(255,255,255,0.85); } 100% { border-color: rgba(255,255,255,0); } }
+
+  /* 5 — beat box + count: brand + information */
+  #beatbox { left: 22px; top: 22px; display: flex; gap: 14px; align-items: center; }
+  #beatbox .box { width: 4.6vmin; height: 4.6vmin; background: #fff; display: flex;
+    align-items: center; justify-content: center;
+    transition: transform 200ms cubic-bezier(.3,0,.15,1); }
+  #beatbox .box span { font-weight: 700; font-size: 1.2vmin; color: #111; }
+  #beatbox .read { font-size: 11px; letter-spacing: 0.16em; line-height: 1.5;
+    font-variant-numeric: tabular-nums; opacity: 0.85; }
+
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff;
     mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
   #label a { color: inherit; }
-  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff;
     mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
     font-variant-numeric: tabular-nums; }
   #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
     flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
-    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+    background: #000; cursor: pointer; transition: opacity 500ms ease; }
   #overlay.leaving { opacity: 0; pointer-events: none; }
   #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
   #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
 </style>
 </head>
-<body>
+<body class="m-1">
 
 <div id="stage"></div>
+
+<div class="metro" id="pendulum"><div class="arm"></div><div class="bob"></div><div class="base"></div></div>
+<div class="metro" id="seq"></div>
+<div class="metro" id="pulse"><div class="ring"></div></div>
+<div class="metro" id="edge"><div class="b"></div></div>
+<div class="metro" id="beatbox"><div class="box"><span>IAAH</span></div><div class="read"></div></div>
+
 <div id="label">SHOW 001 — KATLA · <a href="../../comps/">back</a></div>
 <div id="status"></div>
 <div id="overlay">
   <div class="wordmark">SHOW 001 — KATLA</div>
-  <div class="prompt">the first authored show: a fixed edit, not a generator.
-  every cut and every hold<br>was chosen. it plays on the conductor and loops —
-  36 beats, like a broadcast segment.</div>
+  <div class="prompt">the work changes on every beat now. press 1–5 to swap the metronome
+  indicator:<br>1 pendulum · 2 sequencer · 3 pulse · 4 edge · 5 box + count.</div>
   <div class="prompt">m mute · click to enter, sound on</div>
 </div>
 
@@ -60,29 +104,10 @@ import { createMusic } from '../../js/music.js';
 import { ROOT } from '../../js/data.js';
 
 const A = ROOT + 'assets/shows/katla/';
-
-// ═══ THE EDIT — authored, fixed, looped. The arc: the mark alone in the
-// dark → the mark on stone → color emerges → the land → the figure →
-// the human story → the design system → shipped → resolve to the mark. ═══
-const SHOW = [
-  { kind: 'card', beats: 4, lines: ['SHOW 001', 'KATLA', 'TITLES & KEY ART — IAAH FOR NETFLIX'] },
-  { kind: 'full', beats: 2, img: 'k02.jpg', cut: 'wipe' },   // the mark, white on black
-  { kind: 'full', beats: 2, img: 'k07.jpg', cut: 'wipe' },   // the mark on slate
-  { kind: 'full', beats: 3, img: 'k05.jpg', cut: 'wipe' },   // pink on volcanic rock
-  { kind: 'full', beats: 3, img: 'k06.jpg', cut: 'wipe' },   // the wide land
-  { kind: 'full', beats: 1, img: 'k05.jpg', cut: 'hard' },   // stutter —
-  { kind: 'full', beats: 1, img: 'k06.jpg', cut: 'hard' },   // — the land pulses
-  { kind: 'full', beats: 5, img: 'k04.jpg', cut: 'wipe' },   // HERO: the figure in mist
-  { kind: 'full', beats: 3, img: 'k01.jpg', cut: 'wipe' },   // wet hair, closer, darker
-  { kind: 'full', beats: 3, img: 'k11.jpg', cut: 'wipe' },   // the mirror — the human story
-  { kind: 'duo',  beats: 3, imgs: ['k00.jpg', 'k09.jpg'] },  // the system: cream lockup + color grid
-  { kind: 'full', beats: 3, img: 'k03.jpg', cut: 'wipe' },   // shipped: in the Netflix UI
-  { kind: 'full', beats: 2, img: 'k02.jpg', cut: 'wipe' },   // resolve to the mark
-  { kind: 'card', beats: 2, lines: ['', 'IAAH', 'EVERY SECOND IS A PERFORMANCE'] },
-];
-const TOTAL = SHOW.reduce((a, c) => a + c.beats, 0); // 37 beats
-const OFFSETS = [];
-{ let t = 0; for (const c of SHOW) { OFFSETS.push(t); t += c.beats; } }
+// authored order — one frame per beat, looping. marks and scenes
+// alternate so each beat reads as a clear change.
+const FRAMES = ['k02.jpg','k04.jpg','k07.jpg','k06.jpg','k05.jpg','k11.jpg','k00.jpg','k01.jpg','k03.jpg','k09.jpg'];
+const BAR = 4;
 
 const stage = document.getElementById('stage');
 const statusEl = document.getElementById('status');
@@ -90,91 +115,75 @@ const overlay = document.getElementById('overlay');
 const conductor = createConductor();
 const music = createMusic(conductor);
 
-// preload everything — the show is 1.3MB, it should be seamless
 const cache = new Map();
-function img(name) {
-  if (!cache.has(name)) {
-    const im = new Image();
-    im.src = A + name;
-    cache.set(name, im);
-  }
-  return cache.get(name);
-}
-SHOW.forEach((c) => { if (c.img) img(c.img); if (c.imgs) c.imgs.forEach(img); });
+FRAMES.forEach((n) => { const im = new Image(); im.src = A + n; cache.set(n, im); });
 
-const DIRECTIONS = ['top', 'right', 'bottom', 'left'];
-let dirCount = 0;
-let shownCut = -1;
+// build the sequencer cells
+const seqEl = document.getElementById('seq');
+for (let i = 0; i < BAR; i++) {
+  const c = document.createElement('div');
+  c.className = 'cell bar';
+  seqEl.appendChild(c);
+}
+const seqCells = [...seqEl.children];
+
+const DIRS = ['top', 'right', 'bottom', 'left'];
+let shownBeat = -1;
 let layers = [];
 
-function cutIndexAt(p) {
-  const sp = ((p % TOTAL) + TOTAL) % TOTAL;
-  for (let i = SHOW.length - 1; i >= 0; i--) if (sp >= OFFSETS[i]) return i;
-  return 0;
-}
-
-function buildLayer(cut) {
+function showFrame(beatN) {
+  shownBeat = beatN;
   const layer = document.createElement('div');
-  layer.className = 'layer';
-  if (cut.kind === 'card') {
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `<div class="k">${cut.lines[0]}</div><div class="t">${cut.lines[1]}</div><div class="s">${cut.lines[2]}</div>`;
-    layer.appendChild(card);
-  } else if (cut.kind === 'duo') {
-    cut.imgs.forEach((name, i) => {
-      const ph = document.createElement('div');
-      ph.className = 'ph';
-      ph.style.left = (i * 50) + '%';
-      ph.style.top = '0';
-      ph.style.width = '50%';
-      ph.style.height = '100%';
-      ph.appendChild(img(name).cloneNode());
-      layer.appendChild(ph);
-    });
-  } else {
-    const ph = document.createElement('div');
-    ph.className = 'ph';
-    ph.style.inset = '0';
-    ph.appendChild(img(cut.img).cloneNode());
-    layer.appendChild(ph);
-  }
-  // the quiet push-in: every hold breathes toward you (the Z idea, made cinematic)
-  requestAnimationFrame(() => {
-    layer.querySelectorAll('img').forEach((im) => {
-      im.style.transition = `transform ${cut.beats}s linear`;
-      im.style.transform = 'scale(1.045)';
-    });
-  });
-  return layer;
-}
-
-function showCut(i) {
-  shownCut = i;
-  const cut = SHOW[i];
-  const layer = buildLayer(cut);
-  if (cut.cut === 'wipe') layer.classList.add('in-' + DIRECTIONS[dirCount++ % 4]);
+  layer.className = 'layer in-' + DIRS[beatN % 4];
+  const im = cache.get(FRAMES[((beatN % FRAMES.length) + FRAMES.length) % FRAMES.length]).cloneNode();
+  layer.appendChild(im);
   stage.appendChild(layer);
   layers.push(layer);
   while (layers.length > 2) layers.shift().remove();
-  if (layers.length === 2) {
-    const old = layers[0];
-    setTimeout(() => { if (old.isConnected && layers[0] === old) { layers.shift(); old.remove(); } }, 400);
-  }
 }
 
 function render() {
-  const i = cutIndexAt(conductor.phase());
-  if (i !== shownCut) showCut(i);
+  const beatN = Math.floor(conductor.phase());
+  if (beatN !== shownBeat) showFrame(beatN);
   requestAnimationFrame(render);
 }
 
+// metronome animations
+const pend = document.getElementById('pendulum');
+const pulseRing = document.querySelector('#pulse .ring');
+const edgeB = document.querySelector('#edge .b');
+const beatBox = document.querySelector('#beatbox .box');
+const beatRead = document.querySelector('#beatbox .read');
+let pendDeg = 16, boxDeg = 0;
+
 conductor.onBeat((beat) => {
   music.onBeat(beat);
-  const i = cutIndexAt(conductor.phase());
-  if (i !== shownCut) showCut(i); // occlusion-proof
-  const sp = Math.floor(((beat.wallSec % TOTAL) + TOTAL) % TOTAL);
-  statusEl.textContent = `CUT ${String(shownCut + 1).padStart(2, '0')}/${SHOW.length} · BEAT ${String(sp + 1).padStart(2, '0')}/${TOTAL} · ${beat.date.toTimeString().slice(0, 8)}`;
+  const beatN = Math.floor(conductor.phase());
+  if (beatN !== shownBeat) showFrame(beatN); // occlusion-proof
+  const inBar = beat.n % BAR;
+
+  // 1 pendulum — arrive at the extreme exactly on the beat
+  pendDeg = -pendDeg;
+  pend.style.transition = `transform ${Math.round(60000 / 60)}ms linear`;
+  pend.style.transform = `rotate(${pendDeg}deg)`;
+
+  // 2 sequencer
+  seqCells.forEach((c, i) => c.classList.toggle('on', i === inBar));
+
+  // 3 pulse — retrigger thump
+  pulseRing.classList.remove('thump'); void pulseRing.offsetWidth; pulseRing.classList.add('thump');
+
+  // 4 edge — brighter on the downbeat
+  edgeB.classList.remove('edgeflash'); void edgeB.offsetWidth;
+  edgeB.style.setProperty('--x', inBar === 0 ? 1 : 0.5);
+  edgeB.classList.add('edgeflash');
+
+  // 5 box + count
+  boxDeg += 90;
+  beatBox.style.transform = `rotate(${boxDeg}deg)`;
+  beatRead.innerHTML = `60 BPM · LIVE<br>BEAT ${String(inBar + 1)} / ${BAR}<br>${beat.date.toTimeString().slice(0,8)}`;
+
+  statusEl.textContent = `EVERY BEAT · ${FRAMES[((beatN % FRAMES.length)+FRAMES.length)%FRAMES.length].replace('.jpg','').toUpperCase()} · ${beat.date.toTimeString().slice(0,8)}`;
 });
 
 let entered = false;
@@ -187,17 +196,15 @@ overlay.addEventListener('click', async () => {
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
     requestAnimationFrame(render);
-    musicReady.then(() => music.begin()).catch((err) => {
-      console.warn('[show] music failed, running silent:', err);
-    });
-  } catch (err) {
-    console.error(err);
-    entered = false;
-  }
+    musicReady.then(() => music.begin()).catch(() => {});
+  } catch (err) { console.error(err); entered = false; }
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'm' && entered) music.toggleMute();
+  if (['1','2','3','4','5'].includes(e.key)) {
+    document.body.className = 'm-' + e.key;
+  }
 });
 </script>
 

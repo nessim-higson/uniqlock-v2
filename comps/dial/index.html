@@ -46,10 +46,10 @@
 <div id="status"></div>
 <div id="overlay">
   <div class="wordmark">THE DIAL</div>
-  <div class="prompt">twenty works ring the clock face. the second hand strikes one every
-  three seconds<br>and it floods the background through the displacement shader.
-  every minute, a new ring.<br>same minute, same dial, for everyone.</div>
-  <div class="prompt">m mute · click to enter, sound on</div>
+  <div class="prompt">small works ring the clock face; the second hand strikes one every
+  three seconds<br>and it floods the background through a shader. every minute, a new ring.</div>
+  <div class="prompt">1–6 swap the transition: displace · slide · dissolve · iris · dolly · glitch · m mute</div>
+  <div class="prompt">click to enter, sound on</div>
 </div>
 
 <script type="module">
@@ -118,33 +118,63 @@ const mat = new THREE.ShaderMaterial({
     uniform sampler2D tA; uniform sampler2D tB;
     uniform float prog; uniform float zoom;
     uniform float handAngle; uniform float wake; uniform float aspect;
+    uniform float fx; uniform float slideDir;
     uniform vec2 sA; uniform vec2 oA; uniform vec2 sB; uniform vec2 oB;
+    vec4 sa(vec2 z){ return texture2D(tA, z * sA + oA); }
+    vec4 sb(vec2 z){ return texture2D(tB, z * sB + oB); }
+    float hash(vec2 v){ return fract(sin(dot(v, vec2(91.3, 47.7))) * 4373.1); }
     void main() {
       vec2 z = (vUv - 0.5) / zoom + 0.5;
-      // the hand drags the image: a refraction wake at the hand's angle,
-      // flaring on each tick and settling between them
-      vec2 c = vUv - 0.5;
-      c.x *= aspect;
+      // hand-wake refraction (all modes): the second hand drags the image
+      vec2 c = vUv - 0.5; c.x *= aspect;
       float r = length(c);
       float ang = atan(c.y, c.x);
       float d = mod(ang - handAngle + 3.14159265, 6.2831853) - 3.14159265;
-      float w = exp(-pow(d / 0.26, 2.0)) * smoothstep(0.08, 0.26, r);
-      vec2 tang = normalize(vec2(-c.y, c.x) + 1e-5);
-      z += tang * (w * wake * 0.05);
-      vec2 ua = z * sA + oA;
-      vec2 ub = z * sB + oB;
-      vec4 a0 = texture2D(tA, ua);
-      vec2 dv = (a0.rg - 0.5) * 0.4;
+      float wk = exp(-pow(d / 0.26, 2.0)) * smoothstep(0.08, 0.26, r);
+      z += normalize(vec2(-c.y, c.x) + 1e-5) * (wk * wake * 0.05);
+
       float p = smoothstep(0.0, 1.0, prog);
-      vec4 ca = texture2D(tA, ua + dv * p);
-      vec4 cb = texture2D(tB, ub - dv * (1.0 - p));
-      float m = smoothstep(0.1, 0.9, p + (a0.r - 0.5) * 0.3);
-      gl_FragColor = mix(ca, cb, m);
+      vec4 outc;
+
+      if (fx < 0.5) {
+        // 0 — luminance displacement: pixels become the next, bright first
+        vec4 a0 = sa(z);
+        float lum = (a0.r + a0.g + a0.b) / 3.0;
+        vec2 dv = (a0.rg - 0.5) * 0.4;
+        outc = mix(sa(z + dv * p), sb(z - dv * (1.0 - p)), smoothstep(0.1, 0.9, p + (lum - 0.5) * 0.3));
+      } else if (fx < 1.5) {
+        // 1 — directional slide: B pushes A out along the segment's direction
+        vec2 dir = vec2(cos(slideDir), sin(slideDir));
+        float edge = dot(vUv - 0.5, dir);
+        outc = mix(sa(z + dir * p * 0.6), sb(z - dir * (1.0 - p) * 0.6),
+                   smoothstep(-0.03, 0.03, (p - 0.5) * 1.2 - edge));
+      } else if (fx < 2.5) {
+        // 2 — grain dissolve: B bleeds through A on a noise threshold
+        vec4 ca = sa(z); vec4 cb = sb(z);
+        float lum = (ca.r + ca.g + ca.b) / 3.0;
+        float thr = smoothstep(p - 0.14, p + 0.14, 0.55 * lum + 0.45 * hash(floor(vUv * 220.0)));
+        outc = mix(cb, ca, thr);
+      } else if (fx < 3.5) {
+        // 3 — iris: B opens from the center outward (radial)
+        float rr = length(vUv - 0.5) * 1.6;
+        outc = mix(sb(z), sa(z), smoothstep(p - 0.06, p + 0.06, rr));
+      } else if (fx < 4.5) {
+        // 4 — zoom dolly: A pulls back, B rushes forward
+        outc = mix(sa((z - 0.5) / (1.0 + p * 0.45) + 0.5),
+                   sb((z - 0.5) / (1.45 - p * 0.45) + 0.5), p);
+      } else {
+        // 5 — chromatic glitch: B arrives RGB-split, snapping together
+        float s = (1.0 - abs(p - 0.5) * 2.0) * 0.05;
+        vec4 cb = vec4(sb(z + vec2(s, 0.0)).r, sb(z).g, sb(z - vec2(s, 0.0)).b, 1.0);
+        outc = mix(sa(z), cb, smoothstep(0.2, 0.8, p));
+      }
+      gl_FragColor = outc;
     }`,
   uniforms: {
     tA: { value: null }, tB: { value: null },
     prog: { value: 1 }, zoom: { value: 1 },
     handAngle: { value: 0 }, wake: { value: 0 }, aspect: { value: 1 },
+    fx: { value: 0 }, slideDir: { value: 0 },
     sA: { value: new THREE.Vector2(1, 1) }, oA: { value: new THREE.Vector2(0, 0) },
     sB: { value: new THREE.Vector2(1, 1) }, oB: { value: new THREE.Vector2(0, 0) },
   },
@@ -183,9 +213,9 @@ function buildRing() {
   ringEl.innerHTML = '';
   thumbs = [];
   const m = Math.min(innerWidth, innerHeight);
-  const ts = m * 0.105;
+  const ts = m * 0.055;
   ringEl.style.setProperty('--ts', ts + 'px');
-  const R = m * 0.37;
+  const R = m * 0.4;
   for (let k = 0; k < SEGS; k++) {
     const a = (k / SEGS) * Math.PI * 2 - Math.PI / 2;
     const img = document.createElement('img');
@@ -363,6 +393,8 @@ function renderFrame() {
     mat.uniforms.prog.value = tIn < MORPH ? tIn / MORPH : 1;
     // slow push-in over the hold — the background breathes
     mat.uniforms.zoom.value = 1 + (tIn / SEG_SEC) * 0.035;
+    // per-segment slide direction (deterministic) for fx 1
+    mat.uniforms.slideDir.value = ((S % 8) / 8) * Math.PI * 2;
   }
   renderer.render(scene, camera);
   drawHands();
@@ -397,8 +429,11 @@ conductor.onBeat((beat) => {
   thumbs.forEach((t, i) => t.classList.toggle('on', i === k));
 
   if (entered) renderFrame(); // occlusion-proof
-  statusEl.textContent = `LIVE · RING ${minuteSerial % 10000} · ${beat.date.toTimeString().slice(0, 8)}`;
+  statusEl.textContent = `LIVE · ${FX_NAMES[fxMode]} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
+
+const FX_NAMES = ['DISPLACE', 'SLIDE', 'DISSOLVE', 'IRIS', 'DOLLY', 'GLITCH'];
+let fxMode = 0;
 
 // ── entry ──
 let entered = false;
@@ -430,6 +465,10 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'm' && entered) {
     muted = !muted;
     master.gain.setValueAtTime(muted ? 0 : 1, ctx.currentTime);
+  }
+  if (['1', '2', '3', '4', '5', '6'].includes(e.key)) {
+    fxMode = Number(e.key) - 1;
+    mat.uniforms.fx.value = fxMode;
   }
 });
 </script>
