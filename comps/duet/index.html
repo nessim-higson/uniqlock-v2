@@ -30,10 +30,10 @@
     z-index: 5; font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700;
     font-size: 5vmin; letter-spacing: 0.04em; color: #fff; mix-blend-mode: difference;
     font-variant-numeric: tabular-nums; }
-  #metro { position: fixed; left: 4vmin; top: 4vmin; width: 9vmin; height: 9vmin;
+  #metro { position: fixed; left: 3vmin; top: 3vmin; width: 4.5vmin; height: 4.5vmin;
     z-index: 6; background: #fff; display: none; align-items: center; justify-content: center;
     transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
-  #metro span { font-weight: 700; font-size: 2.4vmin; letter-spacing: 0.04em; color: #111; }
+  #metro span { font-weight: 700; font-size: 1.2vmin; letter-spacing: 0.04em; color: #111; }
 
   #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff;
     mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
@@ -68,7 +68,7 @@
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
 import { loadImageryManifest } from '../../js/data.js';
-import { makeReelVideo, playFrom, startFor } from '../../js/pieces.js';
+import { getClip, playClip, pickClipIdx, warmClips } from '../../js/pieces.js';
 
 const stage = document.getElementById('stage');
 const clockEl = document.getElementById('clock');
@@ -113,7 +113,7 @@ function nextStill() {
   return queue.pop();
 }
 
-const reel = makeReelVideo();
+let curVid = null;
 let reelInUse = false;
 const state = [null, null]; // { cell, video, born }
 
@@ -137,9 +137,10 @@ function replace(slot, makeVideo, n) {
   cell.style.zIndex = '2'; // the incoming wipes in over the outgoing
   cell.className = 'cell in-' + pick(DIRS);
   if (makeVideo) {
-    reel.style.display = 'block';
-    playFrom(reel, startFor(rng(), VIDEO_SEC));
-    cell.appendChild(reel);
+    curVid = getClip(pickClipIdx(rng()));
+    curVid.style.display = 'block';
+    playClip(curVid);
+    cell.appendChild(curVid);
     reelInUse = true;
   } else {
     cell.appendChild(img(nextStill()).cloneNode());
@@ -180,7 +181,7 @@ conductor.onBeat((beat) => {
   if (n !== lastBeat) { lastBeat = n; step(n); } // occlusion-proof
   metroDeg += 90;
   metro.style.transform = `rotate(${metroDeg}deg)`;
-  if (reel.isConnected && reel.closest('.cell') && reel.paused) reel.play().catch(() => {});
+  if (curVid && curVid.isConnected && curVid.closest('.cell') && curVid.paused) curVid.play().catch(() => {});
   statusEl.textContent = `DUET · ${reelInUse ? 'VIDEO + IMAGE' : 'IMAGE + IMAGE'} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
 
@@ -194,6 +195,7 @@ overlay.addEventListener('click', async () => {
     await conductor.start();
     pool = await manifestReady;
     pool.forEach(img);
+    warmClips(4);
     metro.style.display = 'flex';
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
