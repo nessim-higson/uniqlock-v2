@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 12 — swipe</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
+  #stage { position: absolute; inset: 0; }
+  .layer { position: absolute; inset: 0; }
+  .layer img, .layer video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .layer.in-top    { animation: inTop 300ms forwards var(--ease-out); }
+  .layer.in-right  { animation: inRight 300ms forwards var(--ease-out); }
+  .layer.in-bottom { animation: inBottom 300ms forwards var(--ease-out); }
+  .layer.in-left   { animation: inLeft 300ms forwards var(--ease-out); }
+  @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+  @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+  @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+  @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+
+  #clock { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 4; font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700;
+    font-size: 6vmin; letter-spacing: 0.04em; color: #fff; mix-blend-mode: difference;
+    font-variant-numeric: tabular-nums; }
+
+  #metro { position: fixed; left: 4vmin; top: 4vmin; width: 9.5vmin; height: 9.5vmin;
+    z-index: 6; background: #fff; display: flex; align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-family: "Helvetica Neue", Helvetica, sans-serif; font-weight: 700;
+    font-size: 2.5vmin; letter-spacing: 0.04em; color: #111; }
+
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="metro" style="display:none"><span>IAAH</span></div>
+<div id="clock">00:00:00</div>
+<div id="label">COMP 12 — SWIPE · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">SWIPE</div>
+  <div class="prompt">the original mechanic, turned on the archive: time small and centered,<br>
+  a different work — still or clip — swiping in from a new direction on every beat.</div>
+  <div class="prompt">m mute · click to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { loadImageryManifest } from '../../js/data.js';
+import { makeReelVideo, playFrom, startFor } from '../../js/pieces.js';
+
+const stage = document.getElementById('stage');
+const clockEl = document.getElementById('clock');
+const metro = document.getElementById('metro');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+let pool = [];
+const cache = new Map();
+function img(url) {
+  if (!cache.has(url)) { const im = new Image(); im.src = url; cache.set(url, im); }
+  return cache.get(url);
+}
+
+// ── the cadence: a 5-beat cycle — still, still, then a clip that HOLDS for
+// three beats so your reel piece is actually comprehensible. Pure function
+// of the beat serial (broadcast-identical). Stills use the golden walk; the
+// clip picks a reel shot the same way. ──
+const GOLDEN = 0.6180339887498949;
+const GOLD2 = 0.7548776662466927;
+const CYCLE = 5;
+function eventAt(n) {
+  const pos = ((n % CYCLE) + CYCLE) % CYCLE;
+  const base = Math.floor(n / CYCLE) * 3;
+  if (pos === 0) return { change: true, kind: 'still', ci: base };
+  if (pos === 1) return { change: true, kind: 'still', ci: base + 1 };
+  if (pos === 2) return { change: true, kind: 'clip', ci: base + 2 };
+  return { change: false }; // beats 3,4 — the clip holds
+}
+function stillUrl(ci) { return pool[Math.floor((((ci) * GOLDEN) % 1 + 1) % 1 * pool.length)]; }
+function segStart(ci) { return startFor(ci * GOLD2, 3); } // continuous 3s clip segment
+
+const reel = makeReelVideo();
+const DIRS = ['top', 'right', 'bottom', 'left'];
+let shownBeat = -1;
+let layers = [];
+
+function removeLayer(layer) {
+  const v = layer.querySelector('video');
+  if (v) { v.pause(); v.style.display = 'none'; document.body.appendChild(v); }
+  layer.remove();
+}
+
+function showChange(n, info) {
+  const layer = document.createElement('div');
+  layer.className = 'layer in-' + DIRS[((n % 4) + 4) % 4];
+  if (info.kind === 'clip') {
+    reel.style.display = 'block';
+    playFrom(reel, segStart(info.ci));
+    layer.appendChild(reel);
+  } else {
+    layer.appendChild(img(stillUrl(info.ci)).cloneNode());
+  }
+  stage.appendChild(layer);
+  layers.push(layer);
+  while (layers.length > 2) removeLayer(layers.shift());
+}
+
+function tick(n) {
+  shownBeat = n;
+  const info = eventAt(n);
+  if (info.change) showChange(n, info);
+}
+
+function render() {
+  const n = Math.floor(conductor.phase());
+  if (n !== shownBeat) tick(n);
+  clockEl.textContent = new Date(conductor.phase() * 1000).toTimeString().slice(0, 8);
+  requestAnimationFrame(render);
+}
+
+let metroDeg = 0;
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  const n = Math.floor(conductor.phase());
+  if (n !== shownBeat) tick(n); // occlusion-proof
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+  if (reel.isConnected && reel.closest('.layer') && reel.paused) reel.play().catch(() => {});
+  statusEl.textContent = `SWIPE · ${eventAt(n).kind || 'hold'} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    pool = await manifestReady;
+    pool.forEach(img); // preload every still
+    metro.style.display = 'flex';
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch(() => {});
+  } catch (err) { console.error(err); entered = false; }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) music.toggleMute();
+});
+</script>
+
+</body>
+</html>
