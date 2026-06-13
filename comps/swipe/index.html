@@ -31,6 +31,12 @@
     font-size: 6vmin; letter-spacing: 0.04em; color: #fff; mix-blend-mode: difference;
     font-variant-numeric: tabular-nums; }
 
+  #metro { position: fixed; left: 22px; top: 22px; width: 4.2vmin; height: 4.2vmin;
+    z-index: 6; background: #fff; display: flex; align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-family: "Helvetica Neue", Helvetica, sans-serif; font-weight: 700;
+    font-size: 1.1vmin; letter-spacing: 0.04em; color: #111; }
+
   #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
     mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
   #label a { color: inherit; }
@@ -48,6 +54,7 @@
 <body>
 
 <div id="stage"></div>
+<div id="metro" style="display:none"><span>IAAH</span></div>
 <div id="clock">00:00:00</div>
 <div id="label">COMP 12 — SWIPE · <a href="../">back</a></div>
 <div id="status"></div>
@@ -65,6 +72,7 @@ import { loadImageryManifest } from '../../js/data.js';
 
 const stage = document.getElementById('stage');
 const clockEl = document.getElementById('clock');
+const metro = document.getElementById('metro');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const conductor = createConductor();
@@ -113,12 +121,16 @@ function render() {
   requestAnimationFrame(render);
 }
 
+let metroDeg = 0;
 conductor.onBeat((beat) => {
   music.onBeat(beat);
   const n = Math.floor(conductor.phase());
   if (n !== shownBeat) showBeat(n); // occlusion-proof
   // warm the next few
   for (let i = 1; i <= 3; i++) img(urlFor(n + i));
+  // the twisting IAAH mark — quarter-turn on every beat, the visible metronome
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
   statusEl.textContent = `EVERY BEAT · SWIPE ${DIRS[((n % 4)+4)%4].toUpperCase()} · ${beat.date.toTimeString().slice(0, 8)}`;
 });
 
@@ -132,6 +144,7 @@ overlay.addEventListener('click', async () => {
     await conductor.start();
     pool = await manifestReady;
     for (let i = 0; i < 4; i++) img(urlFor(Math.floor(conductor.phase()) + i));
+    metro.style.display = 'flex';
     overlay.classList.add('leaving');
     setTimeout(() => overlay.remove(), 600);
     requestAnimationFrame(render);
