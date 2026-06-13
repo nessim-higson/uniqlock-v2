@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 14 — duet</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
+  #stage { position: absolute; inset: 0; background: #000; }
+  .cell { position: absolute; overflow: hidden; background: #000; }
+  .cell img, .cell video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cell.in-top    { animation: inTop 340ms forwards var(--ease-out); }
+  .cell.in-right  { animation: inRight 340ms forwards var(--ease-out); }
+  .cell.in-bottom { animation: inBottom 340ms forwards var(--ease-out); }
+  .cell.in-left   { animation: inLeft 340ms forwards var(--ease-out); }
+  @keyframes inTop    { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+  @keyframes inRight  { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+  @keyframes inBottom { from { clip-path: inset(100% 0 0 0); } to { clip-path: inset(0); } }
+  @keyframes inLeft   { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0); } }
+
+  #clock { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 5; font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700;
+    font-size: 5vmin; letter-spacing: 0.04em; color: #fff; mix-blend-mode: difference;
+    font-variant-numeric: tabular-nums; }
+  #metro { position: fixed; left: 4vmin; top: 4vmin; width: 9vmin; height: 9vmin;
+    z-index: 6; background: #fff; display: none; align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 2.4vmin; letter-spacing: 0.04em; color: #111; }
+
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.4vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="clock">00:00:00</div>
+<div id="metro"><span>IAAH</span></div>
+<div id="label">COMP 14 — DUET · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">DUET</div>
+  <div class="prompt">two works at a time. on each beat one is replaced — one in, one out.
+  if a video is up it stays, and the images keep replacing one another beside it. the
+  clock and the mark keep time.</div>
+  <div class="prompt">m mute · tap to enter, sound on</div>
+</div>
+
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { loadImageryManifest } from '../../js/data.js';
+import { makeReelVideo, playFrom, startFor } from '../../js/pieces.js';
+
+const stage = document.getElementById('stage');
+const clockEl = document.getElementById('clock');
+const metro = document.getElementById('metro');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+// two slots, stacked in the vertical frame with a small gutter
+const SLOTS = [
+  { x: 0.035, y: 0.045, w: 0.93, h: 0.45 },
+  { x: 0.035, y: 0.515, w: 0.93, h: 0.44 },
+];
+const DIRS = ['top', 'right', 'bottom', 'left'];
+const VIDEO_HOLD = 8;   // beats a video stays before it becomes replaceable
+const VIDEO_SEC = 7;    // seconds of continuous reel a clip plays
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(0x0DDBA11);
+const pick = (a) => a[Math.floor(rng() * a.length)];
+
+let pool = [];
+let queue = [];
+const cache = new Map();
+function img(url) {
+  if (!cache.has(url)) { const im = new Image(); im.src = url; cache.set(url, im); }
+  return cache.get(url);
+}
+function nextStill() {
+  if (!queue.length) {
+    queue = [...pool];
+    for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; }
+  }
+  return queue.pop();
+}
+
+const reel = makeReelVideo();
+let reelInUse = false;
+const state = [null, null]; // { cell, video, born }
+
+function detachReel(cell) {
+  const v = cell && cell.querySelector('video');
+  if (v) { v.pause(); v.style.display = 'none'; document.body.appendChild(v); }
+}
+
+function replace(slot, makeVideo, n) {
+  const def = SLOTS[slot];
+  const old = state[slot];
+
+  // free the reel up front if the outgoing piece was the video
+  if (old && old.video) { reelInUse = false; detachReel(old.cell); }
+
+  const cell = document.createElement('div');
+  cell.style.left = (def.x * 100) + '%';
+  cell.style.top = (def.y * 100) + '%';
+  cell.style.width = (def.w * 100) + '%';
+  cell.style.height = (def.h * 100) + '%';
+  cell.style.zIndex = '2'; // the incoming wipes in over the outgoing
+  cell.className = 'cell in-' + pick(DIRS);
+  if (makeVideo) {
+    reel.style.display = 'block';
+    playFrom(reel, startFor(rng(), VIDEO_SEC));
+    cell.appendChild(reel);
+    reelInUse = true;
+  } else {
+    cell.appendChild(img(nextStill()).cloneNode());
+  }
+  stage.appendChild(cell);
+
+  if (old) {
+    const oc = old.cell;
+    setTimeout(() => { detachReel(oc); oc.remove(); }, 380);
+  }
+  state[slot] = { cell, video: makeVideo, born: n };
+}
+
+// one replacement per beat: swap the older-eligible slot. a video slot is
+// exempt until it has held VIDEO_HOLD beats, so images cycle beside it.
+function step(n) {
+  const eligible = [0, 1].filter((s) => state[s] && (!state[s].video || n - state[s].born >= VIDEO_HOLD));
+  if (!eligible.length) return;
+  eligible.sort((a, b) => state[a].born - state[b].born);
+  const slot = eligible[0];
+  // bring in a video only into an image slot, when none is on screen
+  const makeVideo = !reelInUse && !state[slot].video && rng() < 0.4;
+  replace(slot, makeVideo, n);
+}
+
+let lastBeat = -1;
+function render() {
+  const n = Math.floor(conductor.phase());
+  if (n !== lastBeat) { lastBeat = n; step(n); }
+  clockEl.textContent = new Date(conductor.phase() * 1000).toTimeString().slice(0, 8);
+  requestAnimationFrame(render);
+}
+
+let metroDeg = 0;
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  const n = Math.floor(conductor.phase());
+  if (n !== lastBeat) { lastBeat = n; step(n); } // occlusion-proof
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+  if (reel.isConnected && reel.closest('.cell') && reel.paused) reel.play().catch(() => {});
+  statusEl.textContent = `DUET · ${reelInUse ? 'VIDEO + IMAGE' : 'IMAGE + IMAGE'} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    pool = await manifestReady;
+    pool.forEach(img);
+    metro.style.display = 'flex';
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    // open with two images already up
+    lastBeat = Math.floor(conductor.phase());
+    replace(0, false, lastBeat - 2);
+    replace(1, false, lastBeat - 1);
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch(() => {});
+  } catch (err) { console.error(err); entered = false; }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) music.toggleMute();
+});
+</script>
+
+</body>
+</html>
