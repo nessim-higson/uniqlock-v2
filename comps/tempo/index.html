@@ -86,20 +86,51 @@ let beatN = 0;
 let lastT = 0;
 let entered = false;
 
-// ── audio: a tick whose pitch rises with tempo ──
+// ── audio: a small GENERATIVE kit whose whole timing is derived from the
+// tempo, so changing BPM retimes the "track" live and in perfect lock — kick
+// on the beat, hat on the off-beat, a bass note walking a pentatonic line. ──
 let ctx = null, master = null, muted = false;
-function tick() {
-  if (!ctx) return;
-  const t = ctx.currentTime;
-  const o = ctx.createOscillator();
-  o.type = 'sine';
-  o.frequency.value = 320 + (bpm - 30) * 4;   // higher tempo, brighter tick
+let noiseBuf = null;
+const BASS = [55, 55, 82.41, 73.42, 65.41, 82.41, 98, 73.42]; // A walking line (Hz)
+
+function kick(t) {
+  const o = ctx.createOscillator(); const g = ctx.createGain();
+  o.frequency.setValueAtTime(150, t);
+  o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.24);
+}
+function hat(t) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 8000;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.18, t + 0.004);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
-  o.connect(g); g.connect(master);
-  o.start(t); o.stop(t + 0.1);
+  g.gain.exponentialRampToValueAtTime(0.12, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  s.connect(hp); hp.connect(g); g.connect(master); s.start(t); s.stop(t + 0.06);
+}
+function bass(t, n) {
+  const o = ctx.createOscillator(); o.type = 'triangle';
+  o.frequency.value = BASS[n % BASS.length];
+  const g = ctx.createGain();
+  const len = (60 / bpm) * 0.9;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.22, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + len + 0.05);
+}
+// scheduled on each beat; all offsets are fractions of the current beat, so
+// the groove stretches/compresses exactly with the tempo dial.
+function kit(n) {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const beatSec = 60 / bpm;
+  kick(t);
+  if (n % 2 === 0) bass(t, n / 2 | 0);
+  hat(t + beatSec * 0.5);              // the "and" of the beat
+  if (bpm < 110) hat(t + beatSec * 0.75); // swing in a little more at slow tempo
 }
 
 // ── content (full-bleed, swiping in; the crna pull on the way out) ──
@@ -142,7 +173,7 @@ let metroDeg = 0;
 function onBeat() {
   beatN++;
   swap();
-  tick();
+  kit(beatN);
   metroDeg += 90;
   metro.style.transform = `rotate(${metroDeg}deg)`;
   if (curVid && curVid.closest('.layer') && curVid.paused) curVid.play().catch(() => {});
@@ -177,7 +208,9 @@ addEventListener('keydown', (e) => {
 const manifestReady = loadImageryManifest();
 overlay.addEventListener('click', async () => {
   if (entered) return;
-  ctx = new AudioContext(); master = ctx.createGain(); master.connect(ctx.destination);
+  ctx = new AudioContext(); master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.06, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
   await ctx.resume();
   pool = await manifestReady;
   pool.forEach(img); warmClips(3);
