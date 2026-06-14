@@ -24,9 +24,27 @@
     font-size: 6vmin; letter-spacing: 0.04em; color: #fff; mix-blend-mode: difference;
     font-variant-numeric: tabular-nums; }
   #metro { position: fixed; left: 3vmin; top: 3vmin; width: 4.75vmin; height: 4.75vmin;
-    z-index: 6; background: #fff; display: none; align-items: center; justify-content: center;
-    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
-  #metro span { font-weight: 700; font-size: 1.25vmin; letter-spacing: 0.04em; color: #111; }
+    z-index: 9; background: #fff; display: none; align-items: center; justify-content: center;
+    cursor: pointer; transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 1.25vmin; letter-spacing: 0.04em; color: #111;
+    pointer-events: none; }
+
+  /* the drawer — the mark is the door. clicking it pauses everything and the
+     drawer pulls open from the left. */
+  #drawer { position: fixed; inset: 0 auto 0 0; width: min(82vw, 460px); z-index: 8;
+    background: #111; color: #fff; transform: translateX(-100%);
+    transition: transform 620ms cubic-bezier(.66, 0, .34, 1);
+    display: flex; flex-direction: column; justify-content: center; gap: 1vh;
+    padding: 0 8vw; }
+  #drawer.open { transform: translateX(0); }
+  #drawer .nav-item { font-size: 8vmin; font-weight: 700; letter-spacing: -0.01em;
+    line-height: 1.12; color: #fff; cursor: pointer; width: fit-content; }
+  #drawer .nav-item:hover { color: #000; background: #fff; }
+  #drawer .hint { margin-top: 5vh; font-size: 11px; font-weight: 400; opacity: 0.45;
+    letter-spacing: 0.14em; line-height: 1.7; }
+  #scrim { position: fixed; inset: 0; z-index: 7; background: rgba(0,0,0,0); pointer-events: none;
+    transition: background 620ms ease; }
+  #scrim.on { background: rgba(0,0,0,0.55); pointer-events: auto; }
 
   #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
     mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
@@ -46,6 +64,13 @@
 
 <div id="stage"></div>
 <div id="clock">00:00:00</div>
+<div id="scrim"></div>
+<div id="drawer">
+  <div class="nav-item">WORK</div>
+  <div class="nav-item">ABOUT</div>
+  <div class="nav-item">CONTACT</div>
+  <div class="hint">PLACEHOLDER NAV. THE BROADCAST IS PAUSED.<br>CLICK THE MARK TO CLOSE AND RESUME.</div>
+</div>
 <div id="metro"><span>IAAH</span></div>
 <div id="label">COMP 15 — SOLO · <a href="../">back</a></div>
 <div id="status"></div>
@@ -110,6 +135,17 @@ window.CustomEase && window.gsap.registerPlugin(window.CustomEase);
 window.CustomEase && window.CustomEase.create('pageTransition', 'M0,0 C0.38,0.05 0.48,0.58 0.65,0.82 0.82,1 1,1 1,1');
 const gsap = window.gsap;
 
+// the same exact transition, now applied from each side in turn. the incoming
+// reveals from one edge (clip-path inset), the outgoing pulls back + away off
+// the opposite edge — cycling bottom / top / left / right.
+const SIDES = [
+  { clip: 'inset(100% 0% 0% 0%)', out: { y: '-30vh' } }, // reveal from BOTTOM, old lifts up (original)
+  { clip: 'inset(0% 0% 100% 0%)', out: { y: '30vh' } },  // reveal from TOP, old drops down
+  { clip: 'inset(0% 100% 0% 0%)', out: { x: '30vw' } },  // reveal from LEFT, old slides right
+  { clip: 'inset(0% 0% 0% 100%)', out: { x: '-30vw' } }, // reveal from RIGHT, old slides left
+];
+let sideIdx = 0;
+
 let curVid = null;
 let current = null;    // the layer currently shown (on top)
 let resumeBeat = -1;   // next beat allowed to swipe (after a hang)
@@ -134,15 +170,16 @@ function swipe(n, makeVideo) {
   }
   stage.appendChild(next);
 
+  const side = SIDES[sideIdx % SIDES.length];
+  sideIdx++;
   const out = current;
-  // incoming starts clipped from the bottom, sits ON TOP, then reveals up
-  gsap.set(next, { clipPath: 'inset(100% 0% 0% 0%)', zIndex: 2 });
+  gsap.set(next, { clipPath: side.clip, zIndex: 2 });
   if (out) gsap.set(out, { zIndex: 1 });
   const tl = gsap.timeline({
     onComplete: () => { if (out) { detachVid(out); out.remove(); } },
   });
   if (out) {
-    tl.to(out, { y: '-30vh', opacity: 0.4, scale: 0.8, duration: 0.7, force3D: true, ease: 'pageTransition' }, 0);
+    tl.to(out, { ...side.out, opacity: 0.4, scale: 0.8, duration: 0.7, force3D: true, ease: 'pageTransition' }, 0);
   }
   tl.to(next, { clipPath: 'inset(0% 0% 0% 0%)', duration: 0.7, force3D: true, ease: 'pageTransition' }, 0);
   current = next;
@@ -194,6 +231,32 @@ overlay.addEventListener('click', async () => {
     musicReady.then(() => music.begin()).catch(() => {});
   } catch (err) { console.error(err); entered = false; }
 });
+
+// ── the mark is the door: click pauses sound + tempo + animation and pulls
+// the drawer open; click again (or the scrim) resumes and closes. ──
+const drawer = document.getElementById('drawer');
+const scrim = document.getElementById('scrim');
+let paused = false;
+
+function setPaused(p) {
+  if (p === paused) return;
+  paused = p;
+  drawer.classList.toggle('open', p);
+  scrim.classList.toggle('on', p);
+  if (p) {
+    gsap.globalTimeline.pause();          // freeze any in-flight transition
+    conductor.ctx.suspend();              // freeze the clock, beats and music
+    if (curVid) curVid.pause();
+  } else {
+    conductor.ctx.resume();
+    gsap.globalTimeline.resume();
+    if (curVid && curVid.closest('.layer')) curVid.play().catch(() => {});
+  }
+}
+
+document.getElementById('metro').addEventListener('click', () => { if (entered) setPaused(!paused); });
+scrim.addEventListener('click', () => setPaused(false));
+drawer.querySelectorAll('.nav-item').forEach((el) => el.addEventListener('click', () => setPaused(false)));
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'm' && entered) music.toggleMute();
