@@ -14,32 +14,10 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
     font-family: "Helvetica Neue", Helvetica, sans-serif; }
   :root { --ease-out: cubic-bezier(.1, 1, .2, 1); }
-  #stage { position: absolute; inset: 0; perspective: 1500px; }
-  .layer { position: absolute; inset: 0; overflow: hidden; background: #000; }
+  #stage { position: absolute; inset: 0; background: #000; }
+  .layer { position: absolute; inset: 0; overflow: hidden; background: #000;
+    will-change: transform, clip-path, opacity; }
   .layer img, .layer video { width: 100%; height: 100%; object-fit: cover; display: block; }
-  /* the pull-back: the outgoing piece recedes into depth, rounds its corners,
-     then slides off toward an edge — revealing the incoming piece behind it.
-     direction cycles bottom / left / right / top. */
-  .layer.pull-bottom { animation: pullBottom 720ms forwards cubic-bezier(.66, 0, .34, 1); }
-  .layer.pull-top    { animation: pullTop    720ms forwards cubic-bezier(.66, 0, .34, 1); }
-  .layer.pull-left   { animation: pullLeft   720ms forwards cubic-bezier(.66, 0, .34, 1); }
-  .layer.pull-right  { animation: pullRight  720ms forwards cubic-bezier(.66, 0, .34, 1); }
-  @keyframes pullBottom {
-    40%  { transform: translateZ(-240px); border-radius: 22px; }
-    100% { transform: translateZ(-240px) translateY(82%); border-radius: 22px; opacity: 0; }
-  }
-  @keyframes pullTop {
-    40%  { transform: translateZ(-240px); border-radius: 22px; }
-    100% { transform: translateZ(-240px) translateY(-82%); border-radius: 22px; opacity: 0; }
-  }
-  @keyframes pullLeft {
-    40%  { transform: translateZ(-240px); border-radius: 22px; }
-    100% { transform: translateZ(-240px) translateX(-82%); border-radius: 22px; opacity: 0; }
-  }
-  @keyframes pullRight {
-    40%  { transform: translateZ(-240px); border-radius: 22px; }
-    100% { transform: translateZ(-240px) translateX(82%); border-radius: 22px; opacity: 0; }
-  }
 
   #clock { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
     z-index: 4; font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700;
@@ -79,6 +57,8 @@
   <div class="prompt">m mute · tap to enter, sound on</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/CustomEase.min.js"></script>
 <script type="module">
 import { createConductor } from '../../js/conductor.js';
 import { createMusic } from '../../js/music.js';
@@ -123,10 +103,15 @@ function nextStill() {
   return queue.pop();
 }
 
+// the exact crnacura "async page transition" (alternative-page), 1:1:
+// the OUTGOING piece does y:-30vh, scale:.8, opacity:.4; the INCOMING reveals
+// via clip-path inset(100%→0) from the bottom; both 0.7s on the same CustomEase.
+window.CustomEase && window.gsap.registerPlugin(window.CustomEase);
+window.CustomEase && window.CustomEase.create('pageTransition', 'M0,0 C0.38,0.05 0.48,0.58 0.65,0.82 0.82,1 1,1 1,1');
+const gsap = window.gsap;
+
 let curVid = null;
-const DIRS = ['bottom', 'left', 'right', 'top']; // pull-back cycles these
-let pullIdx = 0;
-let current = null;    // the layer currently shown
+let current = null;    // the layer currently shown (on top)
 let resumeBeat = -1;   // next beat allowed to swipe (after a hang)
 let lastBeat = -1;
 let held = false;      // did this beat hold a hanging video (no swipe)?
@@ -137,10 +122,8 @@ function detachVid(layer) {
 }
 
 function swipe(n, makeVideo) {
-  // the incoming sits behind, full frame; the outgoing PULLS BACK to reveal it
   const next = document.createElement('div');
   next.className = 'layer';
-  next.style.zIndex = '1';
   if (makeVideo) {
     curVid = getClip(pickClipIdx(rng()));
     curVid.style.display = 'block';
@@ -149,18 +132,19 @@ function swipe(n, makeVideo) {
   } else {
     next.appendChild(img(nextStill()).cloneNode());
   }
-  stage.insertBefore(next, stage.firstChild);
+  stage.appendChild(next);
 
-  if (current) {
-    const out = current;
-    out.style.zIndex = '2';
-    out.classList.add('pull-' + DIRS[pullIdx % DIRS.length]);
-    pullIdx++;
-    let done = false;
-    const fin = () => { if (done) return; done = true; detachVid(out); out.remove(); };
-    out.addEventListener('animationend', fin, { once: true });
-    setTimeout(fin, 900);
+  const out = current;
+  // incoming starts clipped from the bottom, sits ON TOP, then reveals up
+  gsap.set(next, { clipPath: 'inset(100% 0% 0% 0%)', zIndex: 2 });
+  if (out) gsap.set(out, { zIndex: 1 });
+  const tl = gsap.timeline({
+    onComplete: () => { if (out) { detachVid(out); out.remove(); } },
+  });
+  if (out) {
+    tl.to(out, { y: '-30vh', opacity: 0.4, scale: 0.8, duration: 0.7, force3D: true, ease: 'pageTransition' }, 0);
   }
+  tl.to(next, { clipPath: 'inset(0% 0% 0% 0%)', duration: 0.7, force3D: true, ease: 'pageTransition' }, 0);
   current = next;
 }
 
