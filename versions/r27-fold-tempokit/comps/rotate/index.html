@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 16 — rotate</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0b0c;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #clock { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 4; font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700;
+    font-size: 5vmin; letter-spacing: 0.04em; color: #fff; mix-blend-mode: difference;
+    font-variant-numeric: tabular-nums; }
+  #metro { position: fixed; left: 3vmin; top: 3vmin; width: 4.75vmin; height: 4.75vmin;
+    z-index: 6; background: #fff; display: none; align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 1.25vmin; letter-spacing: 0.04em; color: #111; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #0b0b0c; color: #fff; cursor: pointer; transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.4vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<div id="clock">00:00:00</div>
+<div id="metro"><span>IAAH</span></div>
+<div id="label">COMP 16 — ROTATE · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">ROTATE</div>
+  <div class="prompt">the archive on a turning carousel in 3D — the ring steps one work toward
+  you on every beat, cards catching the light as they swing past. the clock and the mark keep time.</div>
+  <div class="prompt">m mute · tap to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import * as THREE from 'three';
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { loadImageryManifest } from '../../js/data.js';
+import { getClip, playClip, pickClipIdx, warmClips } from '../../js/pieces.js';
+
+const clockEl = document.getElementById('clock');
+const metro = document.getElementById('metro');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+function mulberry32(a) {
+  return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+const rng = mulberry32(0x70747e);
+
+// ── renderer + scene ──
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+let VW = innerWidth, VH = innerHeight;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0b0c);
+const camera = new THREE.PerspectiveCamera(46, VW / VH, 0.1, 100);
+camera.position.set(0, 0, 9.2);
+camera.lookAt(0, 0, 0);
+
+const key = new THREE.DirectionalLight(0xffffff, 1.1); key.position.set(2, 3, 6); scene.add(key);
+scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+
+// ── the ring of cards ──
+const N = 7;
+const R = 4.3;
+const STEP = (Math.PI * 2) / N;
+const ring = new THREE.Group();
+scene.add(ring);
+
+const loader = new THREE.TextureLoader();
+let manifest = [];
+let stillQ = [];
+function nextStillUrl() {
+  if (!stillQ.length) { stillQ = [...manifest]; for (let i = stillQ.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [stillQ[i], stillQ[j]] = [stillQ[j], stillQ[i]]; } }
+  return stillQ.pop();
+}
+
+const cards = [];
+function makeCard(i) {
+  const geo = new THREE.PlaneGeometry(3, 4);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x111111, side: THREE.DoubleSide, toneMapped: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  const a = i * STEP;
+  mesh.position.set(Math.sin(a) * R, 0, Math.cos(a) * R);
+  mesh.rotation.y = a;                 // face outward (toward camera at front)
+  ring.add(mesh);
+  const card = { mesh, mat, video: null, i };
+  cards.push(card);
+  return card;
+}
+
+function clearCardVideo(card) {
+  if (card.video) { card.video.pause(); card.video = null; }
+}
+
+function dressStill(card) {
+  clearCardVideo(card);
+  loader.load(nextStillUrl(), (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    fitTexture(card, tex);
+    card.mat.map = tex; card.mat.color.set(0xffffff); card.mat.needsUpdate = true;
+  });
+}
+function dressClip(card) {
+  clearCardVideo(card);
+  const v = getClip(pickClipIdx(rng()));
+  v.style.display = 'none';
+  playClip(v);
+  const tex = new THREE.VideoTexture(v);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  card.video = v;
+  card.mat.map = tex; card.mat.color.set(0xffffff); card.mat.needsUpdate = true;
+}
+// cover-fit by adjusting plane UVs (plane is 3x4 = 0.75 aspect)
+function fitTexture(card, tex) {
+  const ia = (tex.image.width || 3) / (tex.image.height || 4);
+  const pa = 3 / 4;
+  if (ia > pa) { tex.repeat.set(pa / ia, 1); tex.offset.set((1 - pa / ia) / 2, 0); }
+  else { tex.repeat.set(1, ia / pa); tex.offset.set(0, (1 - ia / pa) / 2); }
+}
+
+function resize() {
+  VW = innerWidth; VH = innerHeight;
+  camera.aspect = VW / VH; camera.updateProjectionMatrix();
+  renderer.setSize(VW, VH);
+  // pull the camera back on portrait so the ring fits
+  camera.position.z = VW < VH ? 11.5 : 9.2;
+}
+addEventListener('resize', resize);
+
+// ── rotation: stepped one segment per beat, eased ──
+let targetAngle = 0;
+let lastBeat = -1;
+
+function frontIndex(angle) { return ((Math.round(angle / STEP) % N) + N) % N; }
+
+function stepBeat(n) {
+  lastBeat = n;
+  // the card now at the BACK gets refreshed before it swings forward again
+  const back = (frontIndex(targetAngle) + Math.floor(N / 2)) % N;
+  if (rng() < 0.28) dressClip(cards[back]); else dressStill(cards[back]);
+  targetAngle += STEP;
+}
+
+let shownAngle = 0;
+function render() {
+  const phase = conductor.phase();
+  const beat = Math.floor(phase);
+  if (beat !== lastBeat) stepBeat(beat);
+  // ease the ring toward the target angle each frame
+  shownAngle += (targetAngle - shownAngle) * 0.12;
+  ring.rotation.y = -shownAngle;
+  // gentle whole-ring tilt that breathes
+  ring.rotation.x = Math.sin(phase * 0.18) * 0.06;
+  renderer.render(scene, camera);
+  clockEl.textContent = new Date(phase * 1000).toTimeString().slice(0, 8);
+  requestAnimationFrame(render);
+}
+
+let metroDeg = 0;
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  if (Math.floor(conductor.phase()) !== lastBeat) stepBeat(Math.floor(conductor.phase()));
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+  for (const c of cards) if (c.video && c.video.paused) c.video.play().catch(() => {});
+  statusEl.textContent = `ROTATE · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    manifest = await manifestReady;
+    warmClips(3);
+    resize();
+    for (let i = 0; i < N; i++) { makeCard(i); }
+    cards.forEach((c) => (rng() < 0.22 ? dressClip(c) : dressStill(c)));
+    targetAngle = 0; shownAngle = -STEP; lastBeat = Math.floor(conductor.phase());
+    metro.style.display = 'flex';
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch(() => {});
+  } catch (err) { console.error(err); entered = false; const p = overlay.querySelector('.prompt'); if (p) p.textContent = 'failed: ' + err.message; }
+});
+
+document.addEventListener('keydown', (e) => { if (e.key === 'm' && entered) music.toggleMute(); });
+</script>
+
+</body>
+</html>
