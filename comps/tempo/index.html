@@ -122,9 +122,11 @@ let running = true;  // play/pause
 // Friends lo-fi house warmth; The Books / Efterklang collage texture) —
 // generative and tempo-locked. Swung dusty drums, a soft sub, detuned hazy
 // chord stabs through a warm filter, over a continuous vinyl-crackle bed.
-let ctx = null, master = null, warmth = null, muted = false;
+let ctx = null, master = null, warmth = null, space = null, muted = false;
 let noiseBuf = null;
 const SWING = 0.58;  // shuffle: the off-beat lands late
+const hz = (t) => t + (Math.random() - 0.5) * 0.014;     // humanize: ±7ms timing
+const vary = (g) => g * (0.82 + Math.random() * 0.36);   // humanize: velocity
 
 // jazzy nostalgic vamp — 4 chords, 2 beats each (8-beat bar). [root, then voicing]
 const PROG = [
@@ -133,6 +135,12 @@ const PROG = [
   { root: 130.81, notes: [196.00, 261.63, 329.63, 392.00] }, // Cmaj7/G
   { root: 98.00,  notes: [196.00, 246.94, 293.66, 392.00] }, // G
 ];
+
+// a PERSISTENT melody — A-minor pentatonic motif over the 8-beat bar, looping
+// and lightly varying so there's always a tune to follow.
+const PENTA = [220.00, 261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33];
+const MOTIF = [5, 4, 6, 4, 3, 4, 2, 4];   // indices into PENTA, one per beat
+const GRACE = [0, 0, 1, 0, 0, 1, 0, 0];   // add a passing eighth on these beats
 
 function kick(t) {
   const o = ctx.createOscillator(); const g = ctx.createGain();
@@ -174,6 +182,31 @@ function stab(t, notes, dur) {
     });
   });
 }
+// a soft lead voice — two slightly-detuned triangles with vibrato, gentle
+// attack and a long tail into the reverb. this carries the tune.
+function lead(t, f, dur, gain) {
+  const vib = ctx.createOscillator(); vib.frequency.value = 5.2;        // vibrato
+  const vibG = ctx.createGain(); vibG.gain.value = f * 0.006;
+  vib.connect(vibG);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.03);                        // soft attack
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);                  // long tail
+  [-5, 6].forEach((cents) => {
+    const o = ctx.createOscillator(); o.type = 'triangle';
+    o.frequency.value = f * Math.pow(2, cents / 1200);
+    vibG.connect(o.frequency);
+    o.connect(g); o.start(t); o.stop(t + dur + 0.1);
+  });
+  g.connect(warmth);
+  vib.start(t); vib.stop(t + dur + 0.1);
+}
+function makeIR(seconds) {
+  const len = ctx.sampleRate * seconds;
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+  return buf;
+}
 function startBed() {
   // vinyl crackle / tape hiss — the dust under everything (looped noise)
   const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
@@ -191,11 +224,21 @@ function kit(n) {
   const t = ctx.currentTime;
   const beatSec = 60 / bpm;
   const chord = PROG[(Math.floor(n / 2)) % PROG.length];
+  const bar = n % 8;
   kick(t);
-  hat(t + beatSec * SWING, 0.1);            // swung off-beat hat
-  hat(t, 0.04);                              // soft hat on the beat
-  if (n % 2 === 0) { sub(t, chord.root, beatSec * 1.7); stab(t + beatSec * 0.02, chord.notes, beatSec * 1.5); }
-  if (n % 4 === 2) hat(t + beatSec * 0.25, 0.05); // a little ghost shuffle
+  hat(hz(t + beatSec * SWING), vary(0.1));   // swung off-beat hat
+  hat(hz(t), vary(0.035));                    // soft hat on the beat
+  if (n % 2 === 0) { sub(t, chord.root, beatSec * 1.7); stab(hz(t + beatSec * 0.02), chord.notes, beatSec * 1.5); }
+  if (n % 4 === 2) hat(hz(t + beatSec * 0.25), vary(0.045)); // ghost shuffle
+
+  // the persistent melody — one motif note per beat, an octave up, with the
+  // occasional passing eighth, humanized in time and touch
+  const f = PENTA[MOTIF[bar] % PENTA.length] * 2;
+  lead(hz(t), f, beatSec * 1.6, vary(0.12));
+  if (GRACE[bar]) {
+    const gf = PENTA[(MOTIF[bar] + 1) % PENTA.length] * 2;
+    lead(hz(t + beatSec * 0.5), gf, beatSec * 1.1, vary(0.09));
+  }
 }
 
 // ── content (full-bleed, swiping in; the crna pull on the way out) ──
@@ -299,9 +342,17 @@ overlay.addEventListener('click', async () => {
   if (entered) return;
   ctx = new AudioContext();
   master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
-  // warm lo-fi tone: everything musical runs through a gentle lowpass + slight drift
-  warmth = ctx.createBiquadFilter(); warmth.type = 'lowpass'; warmth.frequency.value = 2600; warmth.Q.value = 0.4;
+  // warm lo-fi tone: everything musical runs through a gentle lowpass that
+  // slowly breathes (LFO), so it never sits dead-still
+  warmth = ctx.createBiquadFilter(); warmth.type = 'lowpass'; warmth.frequency.value = 2400; warmth.Q.value = 0.6;
   warmth.connect(master);
+  const fl = ctx.createOscillator(); fl.frequency.value = 0.05;
+  const flg = ctx.createGain(); flg.gain.value = 700;
+  fl.connect(flg); flg.connect(warmth.frequency); fl.start();
+  // space: a generated reverb on the musical bus — the biggest "natural" win
+  space = ctx.createConvolver(); space.buffer = makeIR(2.6);
+  const rev = ctx.createGain(); rev.gain.value = 0.32;
+  warmth.connect(space); space.connect(rev); rev.connect(master);
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.06, ctx.sampleRate);
   const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
   await ctx.resume();
