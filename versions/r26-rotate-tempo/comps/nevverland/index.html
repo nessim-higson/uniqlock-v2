@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 05 — nevverland beat-cut</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; display: none; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<video id="v0" muted playsinline preload="auto"></video>
+<video id="v1" muted playsinline preload="auto"></video>
+<div id="label">COMP 05 — NEVVERLAND BEAT-CUT · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">NEVVERLAND</div>
+  <div class="prompt">your reel, re-edited live on the clock — every cut lands on the grid,<br>
+  pattern derived from the reel's own measured edit rhythm</div>
+  <div class="prompt">1 / 2 / 3 — cut density · m mute · click to enter, sound on</div>
+</div>
+
+<script type="module">
+import { createConductor } from '../../js/conductor.js';
+
+const SRC = (typeof window !== 'undefined' && window.UQ_ASSET_ROOT ? window.UQ_ASSET_ROOT : '../../') + 'assets/reel/nevverland.m4v';
+
+// shot boundaries measured from the reel by frame-difference analysis
+// [start, duration] — these are the reel's real cuts
+const SHOTS = [
+  [0.00, 1.30], [1.30, 2.33], [3.63, 1.37], [5.00, 0.40], [5.40, 0.40],
+  [5.80, 1.63], [7.43, 1.64], [9.07, 1.30], [10.37, 2.50], [12.87, 1.31],
+];
+
+// cut lengths in beats, quantized from the reel's own intervals —
+// long holds with a stutter burst, looped
+const PATTERN = [2, 2, 1, 0.5, 0.5, 2, 2, 1, 2, 0.5, 0.5, 1];
+
+const DENSITY = { 1: { mul: 2, name: 'HALF-TIME' }, 2: { mul: 1, name: 'AS MEASURED' }, 3: { mul: 0.5, name: 'DOUBLE-TIME' } };
+let density = 2;
+
+const overlay = document.getElementById('overlay');
+const statusEl = document.getElementById('status');
+const videos = [document.getElementById('v0'), document.getElementById('v1')];
+
+const conductor = createConductor();
+const { ctx } = conductor;
+
+// ── minimal sound: low pad + a thock on every cut + whisper tick ──
+const master = ctx.createGain();
+master.connect(ctx.destination);
+let muted = false;
+
+function startPad() {
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 420;
+  const g = ctx.createGain(); g.gain.value = 0.02;
+  lp.connect(g); g.connect(master);
+  [[73.42, 0.5], [110, 0.3]].forEach(([f, amp]) => {
+    const o = ctx.createOscillator();
+    o.type = 'sine'; o.frequency.value = f;
+    const og = ctx.createGain(); og.gain.value = amp;
+    o.connect(og); og.connect(lp); o.start();
+  });
+}
+
+function tickAt(when) {
+  const o = ctx.createOscillator();
+  o.type = 'sine'; o.frequency.value = 1200;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.008, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.02);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.03);
+}
+
+let thockFlip = false;
+function thockAt(when) {
+  thockFlip = !thockFlip;
+  const o = ctx.createOscillator();
+  o.type = 'triangle'; o.frequency.value = thockFlip ? 220 : 174.61;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.05, when);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+  o.connect(g); g.connect(master);
+  o.start(when); o.stop(when + 0.25);
+}
+
+// ── the beat-edit engine ──
+let active = 0;
+let order = [];
+let shotPtr = 0;
+let patternPtr = 0;
+let nextCutPhase = 0;
+let cutsDone = 0;
+
+function shuffledIdx() {
+  const a = SHOTS.map((_, i) => i);
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function nextShot() {
+  shotPtr++;
+  if (shotPtr >= order.length) { order = shuffledIdx(); shotPtr = 0; }
+  return SHOTS[order[shotPtr]];
+}
+
+function preseekStandby() {
+  const shot = nextShot();
+  videos[1 - active].currentTime = shot[0] + 0.04;
+}
+
+function doCut() {
+  const v = videos[1 - active];
+  v.play().catch(() => {});
+  v.style.display = 'block';
+  videos[active].style.display = 'none';
+  videos[active].pause();
+  active = 1 - active;
+  preseekStandby();
+  cutsDone++;
+}
+
+function scheduleNextCut() {
+  const dur = PATTERN[patternPtr % PATTERN.length] * DENSITY[density].mul;
+  patternPtr++;
+  nextCutPhase += dur;
+  thockAt(conductor.audioTimeForWallSec(nextCutPhase));
+}
+
+function render() {
+  const p = conductor.phase();
+  if (p - nextCutPhase > 4) {
+    // slept in a background tab: resync to the grid instead of bursting
+    nextCutPhase = Math.ceil(p);
+  } else if (p >= nextCutPhase) {
+    doCut();
+    scheduleNextCut();
+  }
+  requestAnimationFrame(render);
+}
+
+conductor.onBeat((beat) => {
+  tickAt(conductor.audioTimeForWallSec(beat.wallSec + 1));
+  statusEl.textContent = `${DENSITY[density].name} · CUT ${String(cutsDone).padStart(3, '0')} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+// ── entry ──
+let entered = false;
+
+function videoReady(v) {
+  return new Promise((res) => {
+    v.src = SRC;
+    v.addEventListener('canplaythrough', res, { once: true });
+    v.load();
+  });
+}
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  overlay.classList.add('leaving');
+  await conductor.start();
+  startPad();
+  await Promise.all(videos.map(videoReady));
+
+  order = shuffledIdx();
+  shotPtr = 0;
+  videos[0].currentTime = SHOTS[order[0]][0] + 0.04;
+  videos[0].style.display = 'block';
+  videos[0].play().catch(() => {});
+  preseekStandby();
+
+  nextCutPhase = Math.ceil(conductor.phase() + 0.5);
+  scheduleNextCut();
+  requestAnimationFrame(render);
+  setTimeout(() => overlay.remove(), 600);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!entered) return;
+  if (e.key === 'm') {
+    muted = !muted;
+    master.gain.setValueAtTime(muted ? 0 : 1, ctx.currentTime);
+  }
+  if (DENSITY[e.key]) density = Number(e.key);
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 17 — tempo</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; touch-action: none; }
+  #stage { position: absolute; inset: 0; background: #000; }
+  .layer { position: absolute; inset: 0; overflow: hidden; background: #000;
+    will-change: transform, clip-path, opacity; }
+  .layer img, .layer video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  #metro { position: fixed; left: 3vmin; top: 3vmin; width: 4.75vmin; height: 4.75vmin;
+    z-index: 6; background: #fff; display: none; align-items: center; justify-content: center;
+    transition: transform 120ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 1.25vmin; letter-spacing: 0.04em; color: #111; }
+
+  /* the tempo HUD — nternet-style: a big BPM you drag */
+  #tempo { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 5; text-align: center; color: #fff; mix-blend-mode: difference; pointer-events: none; }
+  #tempo .bpm { font-size: 13vmin; font-weight: 700; line-height: 0.9; font-variant-numeric: tabular-nums; }
+  #tempo .lab { font-size: 1.7vmin; letter-spacing: 0.34em; opacity: 0.8; margin-top: 1vh; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 4px; z-index: 5;
+    background: rgba(255,255,255,0.15); }
+  #bar .fill { height: 100%; background: #fff; mix-blend-mode: difference; width: 30%; }
+
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em; font-variant-numeric: tabular-nums; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.4vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/CustomEase.min.js"></script>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="tempo"><div class="bpm">60</div><div class="lab">BPM — DRAG TO CHANGE</div></div>
+<div id="metro"><span>IAAH</span></div>
+<div id="bar"><div class="fill"></div></div>
+<div id="label">COMP 17 — TEMPO · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">TEMPO</div>
+  <div class="prompt">you hold the metronome. drag up/down (or scroll, or ↑/↓) to set the
+  beat — 30 to 180 — and the whole piece speeds up or slows down with you. the work
+  changes on every beat; the tick follows the tempo.</div>
+  <div class="prompt">m mute · tap to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { loadImageryManifest } from '../../js/data.js';
+import { getClip, playClip, pickClipIdx, warmClips } from '../../js/pieces.js';
+
+window.CustomEase && window.gsap.registerPlugin(window.CustomEase);
+window.CustomEase && window.CustomEase.create('pageTransition', 'M0,0 C0.38,0.05 0.48,0.58 0.65,0.82 0.82,1 1,1 1,1');
+const gsap = window.gsap;
+
+const stage = document.getElementById('stage');
+const metro = document.getElementById('metro');
+const bpmEl = document.querySelector('#tempo .bpm');
+const fillEl = document.querySelector('#bar .fill');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+
+// ── free tempo engine (decoupled from the wall clock) ──
+let bpm = 60;
+const BPM_MIN = 30, BPM_MAX = 180;
+let phase = 0;       // beats
+let beatN = 0;
+let lastT = 0;
+let entered = false;
+
+// ── audio: a tick whose pitch rises with tempo ──
+let ctx = null, master = null, muted = false;
+function tick() {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.value = 320 + (bpm - 30) * 4;   // higher tempo, brighter tick
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.18, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t + 0.1);
+}
+
+// ── content (full-bleed, swiping in; the crna pull on the way out) ──
+const SIDES = [
+  { clip: 'inset(100% 0% 0% 0%)', out: { y: '-30vh' } },
+  { clip: 'inset(0% 0% 100% 0%)', out: { y: '30vh' } },
+  { clip: 'inset(0% 100% 0% 0%)', out: { x: '30vw' } },
+  { clip: 'inset(0% 0% 0% 100%)', out: { x: '-30vw' } },
+];
+let sideIdx = 0;
+let pool = [], queue = [];
+const cache = new Map();
+const rngState = { s: 0x7e3 };
+function rng() { rngState.s = (rngState.s * 1103515245 + 12345) & 0x7fffffff; return rngState.s / 0x7fffffff; }
+function img(url) { if (!cache.has(url)) { const im = new Image(); im.src = url; cache.set(url, im); } return cache.get(url); }
+function nextStill() { if (!queue.length) { queue = [...pool]; for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } } return queue.pop(); }
+
+let curVid = null, current = null;
+function swap() {
+  const beatSec = 60 / bpm;
+  const dur = Math.min(0.7, beatSec * 0.78); // transition fits inside the beat
+  const makeVideo = rng() < 0.18;
+  const next = document.createElement('div');
+  next.className = 'layer';
+  if (makeVideo) { curVid = getClip(pickClipIdx(rng())); curVid.style.display = 'block'; playClip(curVid); next.appendChild(curVid); }
+  else next.appendChild(img(nextStill()).cloneNode());
+  stage.appendChild(next);
+  const side = SIDES[sideIdx++ % SIDES.length];
+  const out = current;
+  if (!out) { gsap.set(next, { clipPath: 'inset(0% 0% 0% 0%)', zIndex: 2 }); current = next; return; } // first piece: instant
+  gsap.set(next, { clipPath: side.clip, zIndex: 2 });
+  gsap.set(out, { zIndex: 1 });
+  const tl = gsap.timeline({ onComplete: () => { if (out) { const v = out.querySelector('video'); if (v) { v.pause(); v.style.display = 'none'; document.body.appendChild(v); } out.remove(); } } });
+  if (out) tl.to(out, { ...side.out, opacity: 0.4, scale: 0.8, duration: dur, ease: 'pageTransition' }, 0);
+  tl.to(next, { clipPath: 'inset(0% 0% 0% 0%)', duration: dur, ease: 'pageTransition' }, 0);
+  current = next;
+}
+
+let metroDeg = 0;
+function onBeat() {
+  beatN++;
+  swap();
+  tick();
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+  if (curVid && curVid.closest('.layer') && curVid.paused) curVid.play().catch(() => {});
+}
+
+function loop(t) {
+  if (!entered) { lastT = t; requestAnimationFrame(loop); return; }
+  const dt = Math.min((t - lastT) / 1000, 0.25);
+  lastT = t;
+  phase += dt / (60 / bpm);
+  while (phase >= beatN + 1) onBeat();
+  fillEl.style.width = ((bpm - BPM_MIN) / (BPM_MAX - BPM_MIN) * 100).toFixed(1) + '%';
+  statusEl.textContent = `${Math.round(bpm)} BPM · ${(60 / bpm).toFixed(2)}s / BEAT`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ── tempo control: drag / wheel / arrows ──
+function setBpm(v) { bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, v)); bpmEl.textContent = Math.round(bpm); }
+let dragging = false, dragY = 0, dragBpm = 60;
+addEventListener('pointerdown', (e) => { if (!entered) return; dragging = true; dragY = e.clientY; dragBpm = bpm; });
+addEventListener('pointermove', (e) => { if (!dragging) return; setBpm(dragBpm + (dragY - e.clientY) * 0.5); });
+addEventListener('pointerup', () => { dragging = false; });
+addEventListener('wheel', (e) => { if (entered) setBpm(bpm - e.deltaY * 0.08); }, { passive: true });
+addEventListener('keydown', (e) => {
+  if (!entered) return;
+  if (e.key === 'ArrowUp') setBpm(bpm + 2);
+  if (e.key === 'ArrowDown') setBpm(bpm - 2);
+  if (e.key === 'm') { muted = !muted; master.gain.value = muted ? 0 : 1; }
+});
+
+const manifestReady = loadImageryManifest();
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  ctx = new AudioContext(); master = ctx.createGain(); master.connect(ctx.destination);
+  await ctx.resume();
+  pool = await manifestReady;
+  pool.forEach(img); warmClips(3);
+  metro.style.display = 'flex';
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+  entered = true;
+  swap();           // first piece in immediately
+});
+</script>
+
+</body>
+</html>
