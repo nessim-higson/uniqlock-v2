@@ -188,6 +188,7 @@ function popFlash(el, peak, decay, color) {
 }
 function doTransition(el, spec) {
   const u = nextImg(); if (!u) return;
+  const myTxn = el._txn = (el._txn || 0) + 1;            // invalidates any pending cleanup
   const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
   back.src = u;
   back.style.zIndex = '1'; front.style.zIndex = '0';
@@ -213,7 +214,7 @@ function doTransition(el, spec) {
     front.style.transform = sh + ' scale(.92)'; front.style.opacity = '.5';
   }
   el._front = bk;
-  setTimeout(() => { front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0 0 0 0)'; }, dur + 40);
+  setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0 0 0 0)'; }, dur + 40);
 }
 
 // layouts: track sizes (fr) + per-cell placement {c,r,cs,rs}. portrait via transpose().
@@ -275,15 +276,14 @@ const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
 const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
 // kind = transition verb, dur ms, swap = min beats between cuts, flash = pop opacity, tint = pop colour
 const VSPEC = {
-  pulse:   { kind: 'pull',     dur: 600,  swap: 2, flash: 0.18, tint: 'var(--accent)' },
-  groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.16 },
-  groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.16 },
-  shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.30 },
-  drive:   { kind: 'wipe',     dur: 240,  swap: 2, flash: 0.16 },
-  tick:    { kind: 'cut',      dur: 90,   swap: 2, flash: 0.22 },
+  pulse:   { kind: 'pull',     dur: 600,  swap: 1, flash: 0 },     // the lead — cuts every beat, no flash
+  groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
+  groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
+  shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.26 },
+  drive:   { kind: 'wipe',     dur: 240,  swap: 2, flash: 0.14 },
+  tick:    { kind: 'cut',      dur: 90,   swap: 2, flash: 0.20 },
 };
 const STRONG = new Set(['pulse', 'groanA', 'groanB']);
-const ACCENT = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ffd23e';
 const binding = {};
 VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });   // valid before the first beat
 let curSection = -1, beatFired = [];
@@ -297,7 +297,7 @@ function fire(vname, n, t, audioFn) {
     const el = cells[area];
     if (el.style.display === 'none') return;
     if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; }
-    else popFlash(el, spec.flash, 260, spec.tint ? ACCENT : '#fff');
+    else if (spec.flash) popFlash(el, spec.flash, 260, '#fff');
   }, Math.max(0, (t - ctx.currentTime) * 1000));
 }
 function relabel() {
