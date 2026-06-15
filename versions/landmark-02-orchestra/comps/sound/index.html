@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 19 — sound</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #08080a;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column;
+    justify-content: center; padding: 8vw; gap: 1.4vh; }
+  h1 { font-size: 12px; letter-spacing: 0.28em; opacity: 0.5; font-weight: 700; margin-bottom: 3vh; }
+  .pal { display: flex; align-items: center; gap: 4%; padding: 16px 0;
+    border-top: 1px solid #1c1c20; cursor: pointer; opacity: 0.5; transition: opacity 200ms; }
+  .pal:last-of-type { border-bottom: 1px solid #1c1c20; }
+  .pal:hover { opacity: 0.85; }
+  .pal.on { opacity: 1; }
+  .pal .n { font-size: 5vmin; font-weight: 700; letter-spacing: -0.01em; flex: 0 0 42%; line-height: 1.0; }
+  .pal.on .n { color: #cde; }
+  .pal .d { font-size: 1.7vmin; opacity: 0.55; letter-spacing: 0.02em; line-height: 1.5; flex: 1; }
+  #transport { display: flex; align-items: center; gap: 18px; margin-top: 4vh; }
+  .btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 15px;
+    flex: none; transition: background 160ms, color 160ms; }
+  .btn:hover { background: #fff; color: #111; }
+  #pulse { width: 12px; height: 12px; border-radius: 50%; background: #fff; opacity: 0.2;
+    transition: opacity 90ms, transform 90ms; }
+  #fader { position: relative; width: 38vw; max-width: 380px; height: 30px; cursor: pointer; touch-action: none; }
+  #fader .track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; margin-top: -1px; background: rgba(255,255,255,0.2); }
+  #fader .knob { position: absolute; top: 50%; width: 11px; height: 22px; border-radius: 3px; background: #fff; transform: translate(-50%,-50%); }
+  #bpmlab { font-size: 12px; opacity: 0.6; font-variant-numeric: tabular-nums; letter-spacing: 0.1em; min-width: 6ch; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff; opacity: 0.5; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2.4vmin; background: #08080a; cursor: pointer;
+    transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.2vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <h1>SOUND — TAP A NAME · ARC DEVELOPS OVER TIME · TECTONIC BUILDS WITH TEMPO</h1>
+  <div class="pal" data-i="0"><div class="n">ARC</div><div class="d">a full Kiasmos-style track that develops as it plays: deep kick + sub, then hats, then the melodic hook, a pad, a breakdown, a climax — looping in evolving 8-bar sections. let it run.</div></div>
+  <div class="pal" data-i="1"><div class="n">TECTONIC I — STRATA</div><div class="d">the canonical fork: deep pulse alone at slow tempo, then groans, a far shimmer, an off-beat drive, a top tick — each layer added as the BPM climbs</div></div>
+  <div class="pal" data-i="2"><div class="n">TECTONIC II — MAGMA</div><div class="d">warmer fork: grows a slow low bass melody, then a detuned pad swell, then a high bell motif as you push the tempo up</div></div>
+  <div class="pal" data-i="3"><div class="n">TECTONIC III — FAULT</div><div class="d">darker, rhythmic fork: syncopated second sub, rim clicks, a dissonant low cluster, then a rising sweep + double-time hats up top</div></div>
+  <div id="transport">
+    <div id="play" class="btn">❚❚</div>
+    <div id="pulse"></div>
+    <div id="fader"><div class="track"></div><div class="knob"></div></div>
+    <div id="bpmlab">118 BPM</div>
+  </div>
+</div>
+<div id="label">COMP 19 — SOUND · <a href="../">back</a></div>
+<div id="overlay">
+  <div class="wordmark">SOUND</div>
+  <div class="prompt">four darker, more sophisticated directions to audition and compare.<br>
+  tap a name to switch worlds; slide for tempo. all generative, all live.</div>
+  <div class="prompt">tap to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+const playBtn = document.getElementById('play');
+const pulse = document.getElementById('pulse');
+const fader = document.getElementById('fader');
+const knob = document.querySelector('#fader .knob');
+const bpmlab = document.getElementById('bpmlab');
+const overlay = document.getElementById('overlay');
+const palEls = [...document.querySelectorAll('.pal')];
+
+let ctx, master, bus, space;
+let bpm = 118, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
+const BPM_MIN = 60, BPM_MAX = 130;
+
+// ── shared instruments ──
+function makeIR(sec) { const len = ctx.sampleRate * sec, b = ctx.createBuffer(2, len, ctx.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2); } return b; }
+function voice(o) {
+  const osc = ctx.createOscillator(); osc.type = o.type || 'sawtooth'; osc.frequency.value = o.freq; osc.detune.value = o.detune || 0;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + (o.atk || 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  let tail = osc;
+  if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; if (o.q) f.Q.value = o.q; osc.connect(f); tail = f; }
+  tail.connect(g); g.connect(o.dest || bus);
+  osc.start(o.t); osc.stop(o.t + o.dur + 0.05);
+  return osc;
+}
+let noiseBuf;
+function noise(o) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = o.ftype || 'highpass'; f.frequency.value = o.freq || 6000; if (o.q) f.Q.value = o.q;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  s.connect(f); f.connect(g); g.connect(o.dest || bus); s.start(o.t); s.stop(o.t + o.dur + 0.05);
+  if (o.sweep) f.frequency.exponentialRampToValueAtTime(o.sweep, o.t + o.dur);
+}
+const D = { c2: 65.41, d2: 73.42, f2: 87.31, a2: 110, c3: 130.81, d3: 146.83, e3: 164.81, f3: 174.61, g3: 196, a3: 220, bb3: 233.08, c4: 261.63, d4: 293.66, f4: 349.23, a4: 440 };
+
+// the heavy, bass-y metronome — a deep sub-thud (the timekeeper as an
+// instrument, not a tick). a sine sub with a pitch drop + a quiet octave
+// for definition, straight to the master so the low end stays felt.
+function subThud(t, f0, f1, dur, gain) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + 0.09);
+  const o2 = ctx.createOscillator(); o2.type = 'triangle';
+  o2.frequency.setValueAtTime(f0 * 2, t); o2.frequency.exponentialRampToValueAtTime(Math.max(24, f1 * 2), t + 0.09);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const g2 = ctx.createGain(); g2.gain.value = 0.12;
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+  o.start(t); o.stop(t + dur + 0.05); o2.start(t); o2.stop(t + dur + 0.05);
+}
+
+// a tighter, punchy kick (Kiasmos-style): a fast sine pitch-drop with a
+// noise click on top, dry to the master so it lands hard under the sub.
+function kick(t, gain) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.07);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.37);
+  noise({ ftype: 'highpass', freq: 1800, t, dur: 0.012, gain: gain * 0.22, dest: master });
+}
+
+// the tempo-driven layer gate: nothing extra at 60, a new layer roughly
+// every 14 BPM, fully stacked by ~116. lets each tectonic fork BUILD as
+// you push the fader — more is added the faster it runs.
+function tiers() { return { L1: bpm >= 74, L2: bpm >= 88, L3: bpm >= 102, L4: bpm >= 116 }; }
+
+// ── ARC: a full evolving arrangement (Kiasmos-style). harmony is a 4-bar
+// loop in D minor (Dm–Bb–F–C); the track develops over TIME in 8-bar
+// sections — intro → groove → melody → full → breakdown → climax, then it
+// recycles (skipping the intro), so it keeps building as it plays. ──
+const CHORDS = [
+  { bass: 73.42,  mid: [146.83, 174.61, 220.00] }, // Dm  (D F A)
+  { bass: 58.27,  mid: [233.08, 293.66, 349.23] }, // Bb  (Bb D F)
+  { bass: 87.31,  mid: [174.61, 220.00, 261.63] }, // F   (F A C)
+  { bass: 65.41,  mid: [261.63, 329.63, 392.00] }, // C   (C E G)
+];
+// the recurring lead motif over the 16-beat (4-bar) loop; null = rest
+const MOTIF = [440.00, null, 349.23, null,  587.33, null, 466.16, null,
+               523.25, null, 440.00, null,  392.00, null, 329.63, null];
+
+// ── the palettes — a developing arrangement + the tectonic forks ──
+const palettes = [
+  { // 0 ARC — a full Kiasmos-style track that develops over time
+    live: [],
+    start() { // a quiet noise "air" bed for warmth
+      const sn = ctx.createBufferSource(); sn.buffer = noiseBuf; sn.loop = true;
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2000; f.Q.value = 0.4;
+      const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.linearRampToValueAtTime(0.012, ctx.currentTime + 3);
+      sn.connect(f); f.connect(g); g.connect(bus); sn.start();
+      this.live.push(sn, () => g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 1));
+    },
+    stop() { this.live.forEach((x) => { if (typeof x === 'function') x(); else try { x.stop(ctx.currentTime + 1.1); } catch (e) {} }); this.live = []; },
+    beat(n, t) {
+      const s = 60 / bpm;
+      const bar = Math.floor(n / 4), bib = n % 4, section = Math.floor(bar / 4), barInSec = bar % 4;
+      const mood = section === 0 ? 'intro' : ['groove', 'melody', 'full', 'break', 'climax'][(section - 1) % 5];
+      const chord = CHORDS[bar % 4];
+
+      // sustained sub bass — one note per bar, dry to the master
+      if (bib === 0) voice({ type: 'sine', freq: chord.bass, t, atk: 0.02, dur: s * 4 * 0.98, gain: mood === 'break' ? 0.18 : 0.28, dest: master });
+
+      // kick — half-time in the intro, four-on-the-floor in the groove, gone in the breakdown
+      const kickOn = mood === 'intro' ? (bib === 0 || bib === 2) : (mood !== 'break');
+      if (kickOn) kick(t, mood === 'climax' ? 0.92 : 0.8);
+
+      // hats / shaker
+      if (mood === 'groove' || mood === 'melody' || mood === 'full' || mood === 'climax') noise({ ftype: 'highpass', freq: 8500, t: t + s * 0.5, dur: 0.035, gain: 0.06, dest: bus });
+      if (mood === 'full' || mood === 'climax') for (let k = 0; k < 4; k++) noise({ ftype: 'bandpass', freq: 6000, q: 1, t: t + s * 0.25 * k, dur: 0.03, gain: k % 2 ? 0.03 : 0.045, dest: bus });
+      if (mood === 'climax') { noise({ ftype: 'highpass', freq: 9500, t: t + s * 0.25, dur: 0.02, gain: 0.03, dest: bus }); noise({ ftype: 'highpass', freq: 9500, t: t + s * 0.75, dur: 0.02, gain: 0.03, dest: bus }); }
+
+      // clap / rim backbeat on 2 and 4
+      if ((mood === 'groove' || mood === 'melody' || mood === 'full' || mood === 'climax') && (bib === 1 || bib === 3)) for (let k = 0; k < 3; k++) noise({ ftype: 'bandpass', freq: 1600, q: 0.8, t: t + k * 0.012, dur: 0.05, gain: 0.07, dest: bus });
+
+      // pad chord — a detuned swell, one per bar
+      if ((mood === 'melody' || mood === 'full' || mood === 'break' || mood === 'climax') && bib === 0) {
+        const pg = mood === 'break' ? 0.03 : mood === 'climax' ? 0.028 : 0.022;
+        chord.mid.forEach((f) => [-6, 6].forEach((c) => voice({ type: 'sawtooth', freq: f / 2, detune: c, t, atk: s * 1.4, dur: s * 4.2, gain: pg, lp: mood === 'break' ? 1400 : 900, dest: bus })));
+      }
+
+      // the lead motif — the recurring melodic hook
+      if (mood === 'melody' || mood === 'full' || mood === 'break' || mood === 'climax') {
+        const f = MOTIF[n % 16];
+        if (f) {
+          const dur = mood === 'break' ? s * 2.4 : s * 1.4, mg = (mood === 'full' || mood === 'climax') ? 0.14 : 0.10;
+          voice({ type: 'triangle', freq: f, t, atk: 0.005, dur, gain: mg, lp: 2800, dest: bus });
+          voice({ type: 'sine', freq: f * 2, t, atk: 0.005, dur: dur * 0.5, gain: mg * 0.25, dest: bus });
+        }
+      }
+
+      // climax counter-melody, an octave up and off the beat
+      if (mood === 'climax') { const cf = MOTIF[(n + 8) % 16]; if (cf) voice({ type: 'sine', freq: cf * 2, t: t + s * 0.5, atk: 0.01, dur: s * 1.6, gain: 0.06, dest: bus }); }
+
+      // a riser through the last bar of the breakdown, lifting into the climax
+      if (mood === 'break' && barInSec === 3 && bib === 0) noise({ ftype: 'bandpass', freq: 300, q: 0.6, t, dur: s * 4, gain: 0.1, sweep: 6000, dest: bus });
+    },
+  },
+  { // 1 TECTONIC I — STRATA: deep pulse → groans → shimmer → off-beat drive → top tick
+    live: [], start() {}, stop() {},
+    beat(n, t) {
+      const s = 60 / bpm, { L1, L2, L3, L4 } = tiers();
+      subThud(t, 50, 30, s * 1.8, 0.72);                                         // L0 — always: the heavy metronome
+      if (L1 && n % 8 === 0) voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }); // L1 — geological groans
+      if (L1 && n % 8 === 4) voice({ type: 'sawtooth', freq: D.f2, detune: 5, t, atk: 1.6, dur: s * 7, gain: 0.05, lp: 240, dest: bus });
+      if (L2 && n % 4 === 3) voice({ type: 'sine', freq: D.a4 * 1.5, t, atk: 0.05, dur: s * 4, gain: 0.035, dest: bus }); // L2 — distant shimmer
+      if (L3 && n % 2 === 1) subThud(t, 46, 40, s * 0.85, 0.32);                 // L3 — off-beat ghost sub: a drive emerges
+      if (L4 && n % 2 === 0) noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }); // L4 — top tick, momentum
+    },
+  },
+  { // 1 TECTONIC II — MAGMA: warmer; grows a low bass melody, then a pad, then bells
+    live: [], start() {}, stop() {},
+    beat(n, t) {
+      const s = 60 / bpm, { L1, L2, L3, L4 } = tiers();
+      subThud(t, 52, 32, s * 1.7, 0.66);                                         // L0
+      if (L1 && n % 8 === 0) voice({ type: 'sawtooth', freq: D.d2, detune: -4, t, atk: 1.4, dur: s * 8, gain: 0.06, lp: 300, dest: bus }); // L1 — warm drone
+      if (L2 && n % 4 === 0) { const bass = [D.d2, D.d2, D.f2, D.a2]; voice({ type: 'triangle', freq: bass[(n / 4 | 0) % bass.length], t, atk: 0.02, dur: s * 2, gain: 0.12, lp: 500, dest: bus }); } // L2 — slow bass melody
+      if (L3 && n % 2 === 1) { [D.d3, D.f3, D.a3].forEach((f) => [-7, 7].forEach((c) => voice({ type: 'sawtooth', freq: f, detune: c, t, atk: 0.6, dur: s * 2.4, gain: 0.022, lp: 1100, dest: bus }))); } // L3 — detuned pad swell
+      if (L4 && (n % 8 === 2 || n % 8 === 6)) voice({ type: 'sine', freq: D.a4, t, atk: 0.01, dur: s * 3, gain: 0.05, dest: bus }); // L4 — high bell motif
+    },
+  },
+  { // 2 TECTONIC III — FAULT: darker/rhythmic; syncopation → rim → dissonance → sweep+hats
+    live: [], start() {}, stop() {},
+    beat(n, t) {
+      const s = 60 / bpm, { L1, L2, L3, L4 } = tiers();
+      subThud(t, 48, 28, s * 1.6, 0.7);                                          // L0
+      if (L1 && n % 2 === 1) subThud(t, 44, 40, s * 0.5, 0.3);                    // L1 — syncopated second sub on the 'and'
+      if (L2 && n % 4 === 2) noise({ ftype: 'bandpass', freq: 2200, q: 1.2, t, dur: 0.05, gain: 0.12, dest: bus }); // L2 — rim click
+      if (L3 && n % 8 === 0) { [D.d3, D.e3].forEach((f) => voice({ type: 'sawtooth', freq: f, t, atk: 0.01, dur: 0.5, gain: 0.05, lp: 1300, dest: bus })); } // L3 — dissonant low cluster
+      if (L4) {
+        if (n % 8 === 0) noise({ ftype: 'bandpass', freq: 500, q: 0.7, t, dur: s * 1.6, gain: 0.09, sweep: 5000, dest: bus }); // L4 — rising sweep
+        if (n % 2 === 1) noise({ ftype: 'highpass', freq: 9000, q: 1, t, dur: 0.02, gain: 0.04, dest: bus }); // + double-time hats
+      }
+    },
+  },
+];
+let active = null;
+
+function setPalette(i) {
+  if (active === palettes[i]) return;
+  if (active) active.stop();
+  active = palettes[i];
+  active.start();
+  palEls.forEach((el, j) => el.classList.toggle('on', j === i));
+}
+
+function onBeat() {
+  beatN++;
+  if (active && ctx) active.beat(beatN, ctx.currentTime);
+  pulse.style.opacity = '1'; pulse.style.transform = 'scale(1.6)';
+  setTimeout(() => { pulse.style.opacity = '0.2'; pulse.style.transform = 'scale(1)'; }, 90);
+}
+function loop(t) {
+  if (entered && running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); }
+  lastT = t;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// controls
+function paintFader() { const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN); knob.style.left = (p * 100) + '%'; bpmlab.textContent = Math.round(bpm) + ' BPM'; }
+let drag = false;
+function bpmFromX(x) { const r = fader.getBoundingClientRect(); bpm = BPM_MIN + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (BPM_MAX - BPM_MIN); paintFader(); }
+fader.addEventListener('pointerdown', (e) => { drag = true; fader.setPointerCapture(e.pointerId); bpmFromX(e.clientX); });
+fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); });
+fader.addEventListener('pointerup', () => { drag = false; });
+playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
+palEls.forEach((el) => el.addEventListener('click', () => { if (entered) setPalette(+el.dataset.i); }));
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  ctx = new AudioContext();
+  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  space = ctx.createConvolver(); space.buffer = makeIR(3.2);
+  const rev = ctx.createGain(); rev.gain.value = 0.34; space.connect(rev); rev.connect(master);
+  bus = ctx.createGain(); bus.connect(master); bus.connect(space);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  await ctx.resume();
+  paintFader();
+  setPalette(0);
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+});
+</script>
+
+</body>
+</html>

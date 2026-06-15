@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 20 — orchestra</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
+
+  /* the grid — gapless, square-cornered, grayscale; one block per voice */
+  #grid { position: absolute; inset: 0; display: grid; gap: 0;
+    grid-template-columns: 1fr 2fr 2fr 2fr 2fr 1fr;
+    grid-template-rows: .6fr 2fr 2fr 1.2fr;
+    grid-template-areas:
+      "tick tick tick tick tick shim"
+      "ga   pulse pulse pulse pulse shim"
+      "ga   pulse pulse pulse pulse gb"
+      "drive drive drive drive drive gb"; }
+  .cell { position: relative; min-width: 0; min-height: 0; }
+
+  @media (max-width: 1024px) {
+    #grid { grid-template-columns: 1fr 2fr 2fr 1fr; grid-template-rows: .6fr 2fr 2fr 1.2fr;
+      grid-template-areas:
+        "tick tick tick shim"
+        "ga   pulse pulse shim"
+        "ga   pulse pulse gb"
+        "drive drive drive gb"; }
+  }
+  @media (max-width: 640px) {
+    #grid { grid-template-columns: 1fr 1fr; grid-template-rows: .5fr .8fr 2fr 2fr .9fr .9fr;
+      grid-template-areas:
+        "tick tick"
+        "shim shim"
+        "pulse pulse"
+        "pulse pulse"
+        "ga   gb"
+        "drive drive"; }
+  }
+
+  #status { position: fixed; left: 18px; top: 16px; z-index: 5; color: #fff; mix-blend-mode: difference;
+    font-size: 11px; letter-spacing: 0.16em; font-variant-numeric: tabular-nums; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff; mix-blend-mode: difference;
+    font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+
+  #transport { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 6;
+    display: flex; align-items: center; gap: 16px; background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
+    padding: 10px 16px; border: 1px solid rgba(255,255,255,0.16); border-radius: 30px; }
+  .btn { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.4);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px;
+    flex: none; transition: background 160ms, color 160ms; }
+  .btn:hover { background: #fff; color: #111; }
+  #fader { position: relative; width: 44vw; max-width: 360px; height: 28px; cursor: pointer; touch-action: none; }
+  #fader .track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; margin-top: -1px; background: rgba(255,255,255,0.25); }
+  #fader .knob { position: absolute; top: 50%; width: 11px; height: 22px; border-radius: 3px; background: #fff; transform: translate(-50%,-50%); }
+  #bpmlab { font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums; letter-spacing: 0.08em; min-width: 7ch; }
+
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2.4vmin; background: #000; cursor: pointer;
+    transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.2vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; max-width: 60ch; }
+</style>
+</head>
+<body>
+
+<div id="grid">
+  <div class="cell" id="c-pulse" style="grid-area:pulse;"></div>
+  <div class="cell" id="c-ga"    style="grid-area:ga;"></div>
+  <div class="cell" id="c-gb"    style="grid-area:gb;"></div>
+  <div class="cell" id="c-shim"  style="grid-area:shim;"></div>
+  <div class="cell" id="c-drive" style="grid-area:drive;"></div>
+  <div class="cell" id="c-tick"  style="grid-area:tick;"></div>
+</div>
+
+<div id="status">ORCHESTRA · STRATA</div>
+<div id="label">COMP 20 — ORCHESTRA · <a href="../">back</a></div>
+<div id="transport">
+  <div id="play" class="btn">❚❚</div>
+  <div id="fader"><div class="track"></div><div class="knob"></div></div>
+  <div id="bpmlab">104 BPM</div>
+</div>
+
+<div id="overlay">
+  <div class="wordmark">ORCHESTRA</div>
+  <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns a
+  block; the block lights when its voice plays. drag the tempo to fill the grid in; every eight
+  bars the voices swap blocks. sound on.</div>
+  <div class="prompt">tap to enter</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+const playBtn = document.getElementById('play');
+const fader = document.getElementById('fader');
+const knob = document.querySelector('#fader .knob');
+const bpmlab = document.getElementById('bpmlab');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+
+let ctx, master, bus, space, noiseBuf;
+let bpm = 104, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
+const BPM_MIN = 60, BPM_MAX = 130;
+
+// ── shared instruments (same engine as the sound comp) ──
+function makeIR(sec) { const len = ctx.sampleRate * sec, b = ctx.createBuffer(2, len, ctx.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2); } return b; }
+function voice(o) {
+  const osc = ctx.createOscillator(); osc.type = o.type || 'sawtooth'; osc.frequency.value = o.freq; osc.detune.value = o.detune || 0;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + (o.atk || 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  let tail = osc;
+  if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; if (o.q) f.Q.value = o.q; osc.connect(f); tail = f; }
+  tail.connect(g); g.connect(o.dest || bus);
+  osc.start(o.t); osc.stop(o.t + o.dur + 0.05);
+}
+function noise(o) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = o.ftype || 'highpass'; f.frequency.value = o.freq || 6000; if (o.q) f.Q.value = o.q;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  s.connect(f); f.connect(g); g.connect(o.dest || bus); s.start(o.t); s.stop(o.t + o.dur + 0.05);
+  if (o.sweep) f.frequency.exponentialRampToValueAtTime(o.sweep, o.t + o.dur);
+}
+const D = { d2: 73.42, f2: 87.31, a4: 440 };
+function subThud(t, f0, f1, dur, gain) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + 0.09);
+  const o2 = ctx.createOscillator(); o2.type = 'triangle';
+  o2.frequency.setValueAtTime(f0 * 2, t); o2.frequency.exponentialRampToValueAtTime(Math.max(24, f1 * 2), t + 0.09);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const g2 = ctx.createGain(); g2.gain.value = 0.12;
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+  o.start(t); o.stop(t + dur + 0.05); o2.start(t); o2.stop(t + dur + 0.05);
+}
+
+// ── the grid: blocks, their resting greys (dark → light), and each voice's flash ──
+const cells = { pulse: document.getElementById('c-pulse'), ga: document.getElementById('c-ga'), gb: document.getElementById('c-gb'), shim: document.getElementById('c-shim'), drive: document.getElementById('c-drive'), tick: document.getElementById('c-tick') };
+const BASE = { ga: '#141416', drive: '#222226', tick: '#303036', pulse: '#42424a', gb: '#56565e', shim: '#6c6c74' };
+Object.keys(cells).forEach((k) => { cells[k].dataset.base = BASE[k]; cells[k].style.backgroundColor = BASE[k]; });
+
+// the rotating slots the voices cycle through (a permutation each section)
+const AREAS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
+const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
+const VSPEC = {
+  pulse:   { peak: '#f0f0f4', decay: 440 },
+  groanA:  { peak: '#cfcfd6', decay: 1500 },
+  groanB:  { peak: '#cfcfd6', decay: 1500 },
+  shimmer: { peak: '#ffffff', decay: 240 },
+  drive:   { peak: '#b6b6be', decay: 220 },
+  tick:    { peak: '#dadae0', decay: 130 },
+};
+const binding = {};                       // voice -> area, recomputed each section
+let curSection = -1;
+
+function flash(area, peak, decay) {
+  const el = cells[area]; if (!el) return;
+  el.style.transition = 'none';
+  el.style.backgroundColor = peak;
+  void el.offsetWidth;                     // commit the peak, then ease back to rest
+  el.style.transition = 'background-color ' + decay + 'ms cubic-bezier(.2,.6,.2,1)';
+  el.style.backgroundColor = el.dataset.base;
+}
+function fire(vname, t, audioFn) {
+  audioFn();
+  const area = binding[vname], spec = VSPEC[vname];
+  const delay = Math.max(0, (t - ctx.currentTime) * 1000);
+  setTimeout(() => flash(area, spec.peak, spec.decay), delay);
+}
+
+function beat(n, t) {
+  const s = 60 / bpm;
+  const L1 = bpm >= 74, L2 = bpm >= 88, L3 = bpm >= 102, L4 = bpm >= 116;
+
+  // every 8 bars (32 beats) rotate the voice → block binding
+  const section = Math.floor((n - 1) / 32);
+  if (section !== curSection) { curSection = section; VOICES.forEach((v, i) => { binding[v] = AREAS[(i + section) % AREAS.length]; }); }
+
+  fire('pulse', t, () => subThud(t, 50, 30, s * 1.8, 0.72));                                   // L0 — every beat
+  if (L1 && n % 8 === 0) fire('groanA', t, () => voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }));
+  if (L1 && n % 8 === 4) fire('groanB', t, () => voice({ type: 'sawtooth', freq: D.f2, detune: 5, t, atk: 1.6, dur: s * 7, gain: 0.05, lp: 240, dest: bus }));
+  if (L2 && n % 4 === 3) fire('shimmer', t, () => voice({ type: 'sine', freq: D.a4 * 1.5, t, atk: 0.05, dur: s * 4, gain: 0.035, dest: bus }));
+  if (L3 && n % 2 === 1) fire('drive', t, () => subThud(t, 46, 40, s * 0.85, 0.32));
+  if (L4 && n % 2 === 0) fire('tick', t, () => noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }));
+}
+
+function onBeat() {
+  beatN++;
+  if (ctx) beat(beatN, ctx.currentTime);
+  statusEl.textContent = 'ORCHESTRA · STRATA · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
+}
+function loop(t) {
+  if (entered && running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); }
+  lastT = t;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// controls
+function paintFader() { const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN); knob.style.left = (p * 100) + '%'; bpmlab.textContent = Math.round(bpm) + ' BPM'; }
+let drag = false;
+function bpmFromX(x) { const r = fader.getBoundingClientRect(); bpm = BPM_MIN + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (BPM_MAX - BPM_MIN); paintFader(); }
+fader.addEventListener('pointerdown', (e) => { drag = true; fader.setPointerCapture(e.pointerId); bpmFromX(e.clientX); });
+fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); });
+fader.addEventListener('pointerup', () => { drag = false; });
+playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  ctx = new AudioContext();
+  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  space = ctx.createConvolver(); space.buffer = makeIR(3.2);
+  const rev = ctx.createGain(); rev.gain.value = 0.34; space.connect(rev); rev.connect(master);
+  bus = ctx.createGain(); bus.connect(master); bus.connect(space);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  await ctx.resume();
+  paintFader();
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+});
+</script>
+
+</body>
+</html>
