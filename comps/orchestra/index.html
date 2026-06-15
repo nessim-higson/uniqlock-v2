@@ -9,12 +9,13 @@
   html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
     font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
 
-  /* the grid — gapless, square-cornered, grayscale; placement is JS-driven so
-     the layout can mutate with the music */
   #grid { position: absolute; inset: 0; display: grid; gap: 0; }
-  .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
-  .lab { position: absolute; left: 8px; top: 7px; font-size: 11px; letter-spacing: 0.08em;
-    font-weight: 500; color: #fff; background: rgba(0,0,0,0.34); padding: 2px 6px; border-radius: 3px;
+  .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #161618; }
+  .cell .ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    opacity: 0; transition: opacity 320ms ease; }
+  .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 2; pointer-events: none; }
+  .lab { position: absolute; left: 8px; top: 7px; z-index: 3; font-size: 11px; letter-spacing: 0.08em;
+    font-weight: 500; color: #fff; background: rgba(0,0,0,0.42); padding: 2px 6px; border-radius: 3px;
     display: none; pointer-events: none; }
   #grid.labels .lab { display: inline-block; }
 
@@ -66,11 +67,9 @@
 </div>
 
 <div id="modes">
-  <div class="chip" data-mode="fixed">FIXED</div>
-  <div class="chip" data-mode="morph">MORPH</div>
-  <div class="chip on" data-mode="breathe">BREATHE</div>
   <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
-  <div class="chip" data-mode="repack">REPACK</div>
+  <div class="chip on" data-mode="repack">REPACK</div>
+  <div class="chip" data-mode="breathe">BREATHE</div>
   <div class="chip sep">·</div>
   <div class="chip on" id="labelChip">LABELS</div>
 </div>
@@ -85,13 +84,16 @@
 
 <div id="overlay">
   <div class="wordmark">ORCHESTRA</div>
-  <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns a
-  block; the block lights when its voice plays — and the grid itself changes shape with the music.
-  switch modes up top (or keys 1–5); L toggles labels; drag the tempo. sound on.</div>
+  <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns an
+  image block; the block flashes when its voice plays and cuts to new work on the strong voices,
+  while the grid itself changes shape with the music. switch modes up top; L toggles labels;
+  drag the tempo. sound on.</div>
   <div class="prompt">tap to enter</div>
 </div>
 
 <script type="module">
+import { loadImageryManifest } from '../../js/data.js';
+
 const playBtn = document.getElementById('play');
 const fader = document.getElementById('fader');
 const knob = document.querySelector('#fader .knob');
@@ -133,20 +135,31 @@ function subThud(t, f0, f1, dur, gain) {
   o.start(t); o.stop(t + dur + 0.05); o2.start(t); o2.stop(t + dur + 0.05);
 }
 
+// ── imagery pool ──
+let pool = [], queue = [];
+function nextImg() { if (!pool.length) return ''; if (!queue.length) { queue = [...pool]; for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } } return queue.pop(); }
+const manifestReady = loadImageryManifest().then((p) => { pool = p; pool.forEach((u) => { const im = new Image(); im.src = u; }); return p; }).catch(() => { pool = []; });
+
 // ── the grid model ──
 const cells = { pulse: document.getElementById('c-pulse'), ga: document.getElementById('c-ga'), gb: document.getElementById('c-gb'), shim: document.getElementById('c-shim'), drive: document.getElementById('c-drive'), tick: document.getElementById('c-tick') };
 const CELL_IDS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
-const BASE = { ga: '#141416', drive: '#222226', tick: '#303036', pulse: '#42424a', gb: '#56565e', shim: '#6c6c74' };
-CELL_IDS.forEach((k) => { cells[k].dataset.base = BASE[k]; cells[k].style.backgroundColor = BASE[k]; });
+CELL_IDS.forEach((id) => {
+  const el = cells[id];
+  const a = document.createElement('img'); a.className = 'ph'; a.decoding = 'async';
+  const b = document.createElement('img'); b.className = 'ph'; b.decoding = 'async';
+  const fl = document.createElement('div'); fl.className = 'flash';
+  el.append(a, b, fl);
+  el._layers = [a, b]; el._front = 0; el._flash = fl; el._lastSwap = -99;
+});
+function initImages() { CELL_IDS.forEach((id) => { const el = cells[id]; if (!pool.length) return; el._layers[0].src = nextImg(); el._layers[0].style.opacity = '1'; }); }
+function swapImage(el) { const f = el._front, b = 1 - f; const u = nextImg(); if (!u) return; el._layers[b].src = u; el._layers[b].style.opacity = '1'; el._layers[f].style.opacity = '0'; el._front = b; }
 
-// layouts: track sizes (fr) + per-cell placement {c,r,cs,rs}. cells absent from
-// a layout are hidden. portrait reuses these via transpose().
+// layouts: track sizes (fr) + per-cell placement {c,r,cs,rs}. portrait via transpose().
 const L = {
   broadcast: { cols: [1, 2, 1], rows: [0.6, 1.6, 1.1], place: { tick: { c: 1, r: 1, cs: 3 }, ga: { c: 1, r: 2 }, pulse: { c: 2, r: 2 }, shim: { c: 3, r: 2 }, drive: { c: 1, r: 3, cs: 2 }, gb: { c: 3, r: 3 } } },
   columns:   { cols: [1.6, 1, 1], rows: [1, 1, 1], place: { pulse: { c: 1, r: 1, rs: 3 }, tick: { c: 2, r: 1, cs: 2 }, ga: { c: 2, r: 2 }, shim: { c: 3, r: 2 }, drive: { c: 2, r: 3 }, gb: { c: 3, r: 3 } } },
   stack:     { cols: [1, 1, 1], rows: [0.7, 1.6, 1], place: { tick: { c: 1, r: 1, cs: 3 }, ga: { c: 1, r: 2 }, pulse: { c: 2, r: 2 }, gb: { c: 3, r: 2 }, drive: { c: 1, r: 3, cs: 2 }, shim: { c: 3, r: 3 } } },
   grid6:     { cols: [1, 1, 1], rows: [1, 1], place: { tick: { c: 1, r: 1 }, shim: { c: 2, r: 1 }, ga: { c: 3, r: 1 }, pulse: { c: 1, r: 2 }, drive: { c: 2, r: 2 }, gb: { c: 3, r: 2 } } },
-  bands:     { cols: [1, 1], rows: [1, 1.4, 1], place: { tick: { c: 1, r: 1, cs: 2 }, pulse: { c: 1, r: 2, cs: 2 }, drive: { c: 1, r: 3, cs: 2 } } },
   big:       { cols: [1], rows: [1], place: { pulse: { c: 1, r: 1 } } },
   l3:        { cols: [1, 1], rows: [1.4, 1], place: { pulse: { c: 1, r: 1, cs: 2 }, ga: { c: 1, r: 2 }, gb: { c: 2, r: 2 } } },
   l4:        { cols: [1, 1], rows: [1, 1], place: { pulse: { c: 1, r: 1 }, ga: { c: 2, r: 1 }, gb: { c: 1, r: 2 }, shim: { c: 2, r: 2 } } },
@@ -181,43 +194,50 @@ let breatheTO = 0;
 function doBreathe(areas) {
   if (!areas.length) return;
   const cols = [...baseCols], rows = [...baseRows];
-  areas.forEach((a) => { const p = curPlace[a]; if (!p) return; cols[p.c - 1] = baseCols[p.c - 1] * 1.8; rows[p.r - 1] = baseRows[p.r - 1] * 1.7; });
-  grid.style.transition = 'grid-template-columns .10s ease-out, grid-template-rows .10s ease-out';
+  areas.forEach((a) => { const p = curPlace[a]; if (!p) return; cols[p.c - 1] = baseCols[p.c - 1] * 1.3; rows[p.r - 1] = baseRows[p.r - 1] * 1.28; });
+  grid.style.transition = 'grid-template-columns .14s ease-out, grid-template-rows .14s ease-out';
   grid.style.gridTemplateColumns = cols.map((f) => f + 'fr').join(' ');
   grid.style.gridTemplateRows = rows.map((f) => f + 'fr').join(' ');
   clearTimeout(breatheTO);
-  const back = Math.max(120, (60 / bpm) * 1000 * 0.6);
+  const back = Math.max(160, (60 / bpm) * 1000 * 0.7);
   breatheTO = setTimeout(() => {
     grid.style.transition = 'grid-template-columns ' + back + 'ms ease, grid-template-rows ' + back + 'ms ease';
     grid.style.gridTemplateColumns = baseCols.map((f) => f + 'fr').join(' ');
     grid.style.gridTemplateRows = baseRows.map((f) => f + 'fr').join(' ');
-  }, 90);
+  }, 110);
 }
 
-// ── the voices, their flash, and the rotating voice → block binding ──
+// ── the voices, their flash/swap, and the rotating voice → block binding ──
 const AREAS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
 const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
 const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
+// peak = white-flash opacity, decay ms, swap = min beats between image cuts (null = flash only), strong = breathes
 const VSPEC = {
-  pulse:   { peak: '#f0f0f4', decay: 440 }, groanA: { peak: '#cfcfd6', decay: 1500 },
-  groanB:  { peak: '#cfcfd6', decay: 1500 }, shimmer: { peak: '#ffffff', decay: 240 },
-  drive:   { peak: '#b6b6be', decay: 220 }, tick: { peak: '#dadae0', decay: 130 },
+  pulse:   { peak: 0.34, decay: 440, swap: 2, strong: true },
+  groanA:  { peak: 0.24, decay: 1400, swap: 1, strong: true },
+  groanB:  { peak: 0.24, decay: 1400, swap: 1, strong: true },
+  shimmer: { peak: 0.50, decay: 240, swap: 4, strong: false },
+  drive:   { peak: 0.22, decay: 220, swap: null, strong: false },
+  tick:    { peak: 0.30, decay: 130, swap: null, strong: false },
 };
 const binding = {};
 let curSection = -1, beatFired = [];
-let mode = 'breathe';
+let mode = 'repack';
 
-function flash(area, peak, decay) {
-  const el = cells[area]; if (!el) return;
-  el.style.transition = 'none'; el.style.backgroundColor = peak; void el.offsetWidth;
-  el.style.transition = 'background-color ' + decay + 'ms cubic-bezier(.2,.6,.2,1)';
-  el.style.backgroundColor = el.dataset.base;
+function popFlash(el, peak, decay) {
+  const fl = el._flash;
+  fl.style.transition = 'none'; fl.style.opacity = peak; void fl.offsetWidth;
+  fl.style.transition = 'opacity ' + decay + 'ms cubic-bezier(.2,.6,.2,1)'; fl.style.opacity = '0';
 }
-function fire(vname, t, audioFn) {
+function fire(vname, n, t, audioFn) {
   audioFn();
   const area = binding[vname], spec = VSPEC[vname];
-  beatFired.push(area);
-  setTimeout(() => flash(area, spec.peak, spec.decay), Math.max(0, (t - ctx.currentTime) * 1000));
+  beatFired.push({ area, strong: spec.strong });
+  setTimeout(() => {
+    const el = cells[area];
+    popFlash(el, spec.peak, spec.decay);
+    if (spec.swap != null && n - el._lastSwap >= spec.swap) { swapImage(el); el._lastSwap = n; }
+  }, Math.max(0, (t - ctx.currentTime) * 1000));
 }
 function relabel() {
   const a2v = {}; VOICES.forEach((v) => { a2v[binding[v]] = v; });
@@ -227,8 +247,7 @@ function activeCount() { return 1 + (bpm >= 74 ? 2 : 0) + (bpm >= 88 ? 1 : 0) + 
 
 function applyModeLayout() {
   const sec = Math.max(0, curSection);
-  if (mode === 'fixed' || mode === 'breathe') applyLayout(L.broadcast, 'broadcast');
-  else if (mode === 'morph') { const a = [L.big, L.bands, L.grid6, L.stack]; const i = sec % a.length; applyLayout(a[i], 'morph' + i); }
+  if (mode === 'breathe') applyLayout(L.broadcast, 'broadcast');
   else if (mode === 'repack') { const a = [L.broadcast, L.columns, L.stack, L.grid6]; const i = sec % a.length; applyLayout(a[i], 'repack' + i); }
   else if (mode === 'subdivide') { const c = activeCount(); const m = { 1: L.big, 3: L.l3, 4: L.l4, 5: L.l5, 6: L.grid6 }; applyLayout(m[c] || L.grid6, 'sub' + c); }
 }
@@ -239,19 +258,19 @@ function beat(n, t) {
   const section = Math.floor((n - 1) / 32);
   if (section !== curSection) { curSection = section; VOICES.forEach((v, i) => { binding[v] = AREAS[(i + section) % AREAS.length]; }); relabel(); }
 
-  fire('pulse', t, () => subThud(t, 50, 30, s * 1.8, 0.72));
-  if (L1 && n % 8 === 0) fire('groanA', t, () => voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }));
-  if (L1 && n % 8 === 4) fire('groanB', t, () => voice({ type: 'sawtooth', freq: D.f2, detune: 5, t, atk: 1.6, dur: s * 7, gain: 0.05, lp: 240, dest: bus }));
-  if (L2 && n % 4 === 3) fire('shimmer', t, () => voice({ type: 'sine', freq: D.a4 * 1.5, t, atk: 0.05, dur: s * 4, gain: 0.035, dest: bus }));
-  if (L3 && n % 2 === 1) fire('drive', t, () => subThud(t, 46, 40, s * 0.85, 0.32));
-  if (L4 && n % 2 === 0) fire('tick', t, () => noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }));
+  fire('pulse', n, t, () => subThud(t, 50, 30, s * 1.8, 0.72));
+  if (L1 && n % 8 === 0) fire('groanA', n, t, () => voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }));
+  if (L1 && n % 8 === 4) fire('groanB', n, t, () => voice({ type: 'sawtooth', freq: D.f2, detune: 5, t, atk: 1.6, dur: s * 7, gain: 0.05, lp: 240, dest: bus }));
+  if (L2 && n % 4 === 3) fire('shimmer', n, t, () => voice({ type: 'sine', freq: D.a4 * 1.5, t, atk: 0.05, dur: s * 4, gain: 0.035, dest: bus }));
+  if (L3 && n % 2 === 1) fire('drive', n, t, () => subThud(t, 46, 40, s * 0.85, 0.32));
+  if (L4 && n % 2 === 0) fire('tick', n, t, () => noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }));
 }
 
 function onBeat() {
   beatN++; beatFired = [];
   if (ctx) beat(beatN, ctx.currentTime);
   applyModeLayout();
-  if (mode === 'breathe') doBreathe(beatFired);
+  if (mode === 'breathe') doBreathe(beatFired.filter((f) => f.strong).map((f) => f.area));
   statusEl.textContent = 'ORCHESTRA · STRATA · ' + mode.toUpperCase() + ' · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
 }
 function loop(t) {
@@ -267,7 +286,7 @@ document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventLi
 const labelChip = document.getElementById('labelChip');
 function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
 labelChip.addEventListener('click', toggleLabels);
-const MODE_KEYS = { '1': 'fixed', '2': 'morph', '3': 'breathe', '4': 'subdivide', '5': 'repack' };
+const MODE_KEYS = { '1': 'subdivide', '2': 'repack', '3': 'breathe' };
 document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); });
 
 function paintFader() { const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN); knob.style.left = (p * 100) + '%'; bpmlab.textContent = Math.round(bpm) + ' BPM'; }
@@ -290,6 +309,8 @@ overlay.addEventListener('click', async () => {
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
   const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
   await ctx.resume();
+  await manifestReady;
+  initImages();
   paintFader();
   applyModeLayout();
   overlay.classList.add('leaving');
