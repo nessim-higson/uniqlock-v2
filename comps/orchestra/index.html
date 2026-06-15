@@ -285,6 +285,7 @@ const VSPEC = {
 const STRONG = new Set(['pulse', 'groanA', 'groanB']);
 const ACCENT = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#ffd23e';
 const binding = {};
+VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });   // valid before the first beat
 let curSection = -1, beatFired = [];
 let mode = 'repack';
 
@@ -303,13 +304,24 @@ function relabel() {
   const a2v = {}; VOICES.forEach((v) => { a2v[binding[v]] = v; });
   CELL_IDS.forEach((id) => { cells[id].querySelector('.lab').textContent = a2v[id] ? NAME[a2v[id]] : ''; });
 }
-function activeCount() { return 1 + (bpm >= 74 ? 2 : 0) + (bpm >= 88 ? 1 : 0) + (bpm >= 102 ? 1 : 0) + (bpm >= 116 ? 1 : 0); }
+// which voices are sounding at this tempo (pulse is always live)
+function activeVoiceList() { const a = ['pulse']; if (bpm >= 74) a.push('groanA', 'groanB'); if (bpm >= 88) a.push('shimmer'); if (bpm >= 102) a.push('drive'); if (bpm >= 116) a.push('tick'); return a; }
+// subdivide is built from the live voices' current blocks — PULSE is the focal
+// band, the rest tile beneath. at the lowest tempo PULSE fills the screen.
+function buildSubdivide() {
+  const areas = activeVoiceList().map((v) => binding[v]), place = {};
+  if (areas.length === 1) { place[areas[0]] = { c: 1, r: 1 }; return { cols: [1], rows: [1], place }; }
+  const bottom = areas.length - 1;
+  place[areas[0]] = { c: 1, r: 1, cs: bottom };
+  for (let i = 1; i < areas.length; i++) place[areas[i]] = { c: i, r: 2 };
+  return { cols: Array(bottom).fill(1), rows: [1.8, 1], place };
+}
 
 function applyModeLayout() {
   const sec = Math.max(0, curSection);
   if (mode === 'breathe') applyLayout(L.broadcast, 'broadcast');
   else if (mode === 'repack') { const a = [L.broadcast, L.columns, L.stack, L.grid6]; const i = sec % a.length; applyLayout(a[i], 'repack' + i); }
-  else if (mode === 'subdivide') { const c = activeCount(); const m = { 1: L.big, 3: L.l3, 4: L.l4, 5: L.l5, 6: L.grid6 }; applyLayout(m[c] || L.grid6, 'sub' + c); }
+  else if (mode === 'subdivide') applyLayout(buildSubdivide(), 'sub' + activeVoiceList().length + '-' + sec);
 }
 
 function beat(n, t) {
