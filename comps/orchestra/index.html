@@ -22,17 +22,15 @@
     display: none; pointer-events: none; }
   #grid.labels .lab { display: inline-block; }
 
-  /* typographic hero — the clock returns, in the UNIQLO display face */
-  #bigclock { position: fixed; left: 2.5vw; bottom: 3.4vh; z-index: 4; color: #fff;
-    font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-weight: 700;
-    font-size: clamp(46px, 12.5vw, 240px); line-height: 0.8; letter-spacing: -0.02em;
-    font-variant-numeric: tabular-nums; mix-blend-mode: difference; pointer-events: none;
-    transition: transform 120ms cubic-bezier(.2,.6,.2,1); white-space: nowrap; }
-  #bigclock #sc { font-size: 0.34em; vertical-align: super; opacity: 0.85; margin-left: 0.08em; }
+  /* the IAAH mark, as the metronome — a white box that snaps 90° on every beat */
+  #metro { position: fixed; left: 3vmin; top: 3vmin; z-index: 6; width: 6vmin; height: 6vmin;
+    min-width: 46px; min-height: 46px; background: #fff; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; transition: transform 220ms cubic-bezier(.3,0,.15,1); }
+  #metro span { font-weight: 700; font-size: 1.55vmin; letter-spacing: 0.06em; color: #111; }
 
   #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
     font-size: 11px; letter-spacing: 0.14em; font-variant-numeric: tabular-nums; }
-  #label { position: fixed; left: 18px; top: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
     font-size: 11px; letter-spacing: 0.14em; }
   #label a { color: inherit; }
 
@@ -83,7 +81,7 @@
   <div class="cell" id="c-tick"><span class="lab"></span></div>
 </div>
 
-<div id="bigclock"><span id="hm">00:00</span><span id="sc">00</span></div>
+<div id="metro"><span>IAAH</span></div>
 
 <div id="modes">
   <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
@@ -105,7 +103,7 @@
   <div class="wordmark">ORCHESTRA</div>
   <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns an
   image block and changes it with its own transition — PULSE the crna pull, groans a slow zoom,
-  drive a wipe, tick a hard cut — while the grid reshapes with the music and the clock keeps time.
+  drive a wipe, tick a hard cut — while the grid reshapes with the music and the IAAH mark keeps time.
   switch modes up top; L toggles labels; drag the tempo. sound on.</div>
   <div class="prompt">tap to enter</div>
 </div>
@@ -121,9 +119,7 @@ const bpmlab = document.getElementById('bpmlab');
 const statusEl = document.getElementById('status');
 const overlay = document.getElementById('overlay');
 const grid = document.getElementById('grid');
-const bigclock = document.getElementById('bigclock');
-const hmEl = document.getElementById('hm');
-const scEl = document.getElementById('sc');
+const metro = document.getElementById('metro');
 
 let ctx, master, bus, space, noiseBuf;
 let bpm = 104, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
@@ -327,26 +323,17 @@ function beat(n, t) {
   if (L4 && n % 2 === 0) fire('tick', n, t, () => noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }));
 }
 
-const pad = (v) => String(v).padStart(2, '0');
-let lastSec = -1;
-function tickClock() {
-  const d = new Date(), sNow = d.getSeconds();
-  if (sNow === lastSec) return;
-  lastSec = sNow;
-  hmEl.textContent = pad(d.getHours()) + ':' + pad(d.getMinutes());
-  scEl.textContent = pad(sNow);
-}
-
+let metroDeg = 0;
 function onBeat() {
   beatN++; beatFired = [];
   if (ctx) beat(beatN, ctx.currentTime);
   applyModeLayout();
   if (mode === 'breathe' && !RM) doBreathe(beatFired.filter((f) => f.strong).map((f) => f.area));
-  if (!RM) { bigclock.style.transform = 'scale(1.014)'; setTimeout(() => { bigclock.style.transform = 'scale(1)'; }, 110); }
+  if (!RM) { metroDeg += 90; metro.style.transform = 'rotate(' + metroDeg + 'deg)'; }  // the mark keeps time
   statusEl.textContent = 'ORCHESTRA · STRATA · ' + mode.toUpperCase() + ' · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
 }
 function loop(t) {
-  if (entered) { tickClock(); if (running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); } }
+  if (entered && running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); }
   lastT = t;
   requestAnimationFrame(loop);
 }
