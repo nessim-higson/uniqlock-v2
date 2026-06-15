@@ -43,15 +43,16 @@
 <body>
 
 <div id="wrap">
-  <h1>SOUND — TECTONIC FORKS · TAP A NAME · DRAG TEMPO TO BUILD</h1>
-  <div class="pal" data-i="0"><div class="n">TECTONIC I — STRATA</div><div class="d">the canonical fork: deep pulse alone at slow tempo, then groans, a far shimmer, an off-beat drive, a top tick — each layer added as the BPM climbs</div></div>
-  <div class="pal" data-i="1"><div class="n">TECTONIC II — MAGMA</div><div class="d">warmer fork: grows a slow low bass melody, then a detuned pad swell, then a high bell motif as you push the tempo up</div></div>
-  <div class="pal" data-i="2"><div class="n">TECTONIC III — FAULT</div><div class="d">darker, rhythmic fork: syncopated second sub, rim clicks, a dissonant low cluster, then a rising sweep + double-time hats up top</div></div>
+  <h1>SOUND — TAP A NAME · ARC DEVELOPS OVER TIME · TECTONIC BUILDS WITH TEMPO</h1>
+  <div class="pal" data-i="0"><div class="n">ARC</div><div class="d">a full Kiasmos-style track that develops as it plays: deep kick + sub, then hats, then the melodic hook, a pad, a breakdown, a climax — looping in evolving 8-bar sections. let it run.</div></div>
+  <div class="pal" data-i="1"><div class="n">TECTONIC I — STRATA</div><div class="d">the canonical fork: deep pulse alone at slow tempo, then groans, a far shimmer, an off-beat drive, a top tick — each layer added as the BPM climbs</div></div>
+  <div class="pal" data-i="2"><div class="n">TECTONIC II — MAGMA</div><div class="d">warmer fork: grows a slow low bass melody, then a detuned pad swell, then a high bell motif as you push the tempo up</div></div>
+  <div class="pal" data-i="3"><div class="n">TECTONIC III — FAULT</div><div class="d">darker, rhythmic fork: syncopated second sub, rim clicks, a dissonant low cluster, then a rising sweep + double-time hats up top</div></div>
   <div id="transport">
     <div id="play" class="btn">❚❚</div>
     <div id="pulse"></div>
     <div id="fader"><div class="track"></div><div class="knob"></div></div>
-    <div id="bpmlab">88 BPM</div>
+    <div id="bpmlab">118 BPM</div>
   </div>
 </div>
 <div id="label">COMP 19 — SOUND · <a href="../">back</a></div>
@@ -72,7 +73,7 @@ const overlay = document.getElementById('overlay');
 const palEls = [...document.querySelectorAll('.pal')];
 
 let ctx, master, bus, space;
-let bpm = 88, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
+let bpm = 118, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
 const BPM_MIN = 60, BPM_MAX = 130;
 
 // ── shared instruments ──
@@ -110,14 +111,92 @@ function subThud(t, f0, f1, dur, gain) {
   o.start(t); o.stop(t + dur + 0.05); o2.start(t); o2.stop(t + dur + 0.05);
 }
 
+// a tighter, punchy kick (Kiasmos-style): a fast sine pitch-drop with a
+// noise click on top, dry to the master so it lands hard under the sub.
+function kick(t, gain) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.07);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.37);
+  noise({ ftype: 'highpass', freq: 1800, t, dur: 0.012, gain: gain * 0.22, dest: master });
+}
+
 // the tempo-driven layer gate: nothing extra at 60, a new layer roughly
 // every 14 BPM, fully stacked by ~116. lets each tectonic fork BUILD as
 // you push the fader — more is added the faster it runs.
 function tiers() { return { L1: bpm >= 74, L2: bpm >= 88, L3: bpm >= 102, L4: bpm >= 116 }; }
 
-// ── the palettes — tectonic forks that build with tempo + two ambient holdovers ──
+// ── ARC: a full evolving arrangement (Kiasmos-style). harmony is a 4-bar
+// loop in D minor (Dm–Bb–F–C); the track develops over TIME in 8-bar
+// sections — intro → groove → melody → full → breakdown → climax, then it
+// recycles (skipping the intro), so it keeps building as it plays. ──
+const CHORDS = [
+  { bass: 73.42,  mid: [146.83, 174.61, 220.00] }, // Dm  (D F A)
+  { bass: 58.27,  mid: [233.08, 293.66, 349.23] }, // Bb  (Bb D F)
+  { bass: 87.31,  mid: [174.61, 220.00, 261.63] }, // F   (F A C)
+  { bass: 65.41,  mid: [261.63, 329.63, 392.00] }, // C   (C E G)
+];
+// the recurring lead motif over the 16-beat (4-bar) loop; null = rest
+const MOTIF = [440.00, null, 349.23, null,  587.33, null, 466.16, null,
+               523.25, null, 440.00, null,  392.00, null, 329.63, null];
+
+// ── the palettes — a developing arrangement + the tectonic forks ──
 const palettes = [
-  { // 0 TECTONIC I — STRATA: deep pulse → groans → shimmer → off-beat drive → top tick
+  { // 0 ARC — a full Kiasmos-style track that develops over time
+    live: [],
+    start() { // a quiet noise "air" bed for warmth
+      const sn = ctx.createBufferSource(); sn.buffer = noiseBuf; sn.loop = true;
+      const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2000; f.Q.value = 0.4;
+      const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.linearRampToValueAtTime(0.012, ctx.currentTime + 3);
+      sn.connect(f); f.connect(g); g.connect(bus); sn.start();
+      this.live.push(sn, () => g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 1));
+    },
+    stop() { this.live.forEach((x) => { if (typeof x === 'function') x(); else try { x.stop(ctx.currentTime + 1.1); } catch (e) {} }); this.live = []; },
+    beat(n, t) {
+      const s = 60 / bpm;
+      const bar = Math.floor(n / 4), bib = n % 4, section = Math.floor(bar / 4), barInSec = bar % 4;
+      const mood = section === 0 ? 'intro' : ['groove', 'melody', 'full', 'break', 'climax'][(section - 1) % 5];
+      const chord = CHORDS[bar % 4];
+
+      // sustained sub bass — one note per bar, dry to the master
+      if (bib === 0) voice({ type: 'sine', freq: chord.bass, t, atk: 0.02, dur: s * 4 * 0.98, gain: mood === 'break' ? 0.18 : 0.28, dest: master });
+
+      // kick — half-time in the intro, four-on-the-floor in the groove, gone in the breakdown
+      const kickOn = mood === 'intro' ? (bib === 0 || bib === 2) : (mood !== 'break');
+      if (kickOn) kick(t, mood === 'climax' ? 0.92 : 0.8);
+
+      // hats / shaker
+      if (mood === 'groove' || mood === 'melody' || mood === 'full' || mood === 'climax') noise({ ftype: 'highpass', freq: 8500, t: t + s * 0.5, dur: 0.035, gain: 0.06, dest: bus });
+      if (mood === 'full' || mood === 'climax') for (let k = 0; k < 4; k++) noise({ ftype: 'bandpass', freq: 6000, q: 1, t: t + s * 0.25 * k, dur: 0.03, gain: k % 2 ? 0.03 : 0.045, dest: bus });
+      if (mood === 'climax') { noise({ ftype: 'highpass', freq: 9500, t: t + s * 0.25, dur: 0.02, gain: 0.03, dest: bus }); noise({ ftype: 'highpass', freq: 9500, t: t + s * 0.75, dur: 0.02, gain: 0.03, dest: bus }); }
+
+      // clap / rim backbeat on 2 and 4
+      if ((mood === 'groove' || mood === 'melody' || mood === 'full' || mood === 'climax') && (bib === 1 || bib === 3)) for (let k = 0; k < 3; k++) noise({ ftype: 'bandpass', freq: 1600, q: 0.8, t: t + k * 0.012, dur: 0.05, gain: 0.07, dest: bus });
+
+      // pad chord — a detuned swell, one per bar
+      if ((mood === 'melody' || mood === 'full' || mood === 'break' || mood === 'climax') && bib === 0) {
+        const pg = mood === 'break' ? 0.03 : mood === 'climax' ? 0.028 : 0.022;
+        chord.mid.forEach((f) => [-6, 6].forEach((c) => voice({ type: 'sawtooth', freq: f / 2, detune: c, t, atk: s * 1.4, dur: s * 4.2, gain: pg, lp: mood === 'break' ? 1400 : 900, dest: bus })));
+      }
+
+      // the lead motif — the recurring melodic hook
+      if (mood === 'melody' || mood === 'full' || mood === 'break' || mood === 'climax') {
+        const f = MOTIF[n % 16];
+        if (f) {
+          const dur = mood === 'break' ? s * 2.4 : s * 1.4, mg = (mood === 'full' || mood === 'climax') ? 0.14 : 0.10;
+          voice({ type: 'triangle', freq: f, t, atk: 0.005, dur, gain: mg, lp: 2800, dest: bus });
+          voice({ type: 'sine', freq: f * 2, t, atk: 0.005, dur: dur * 0.5, gain: mg * 0.25, dest: bus });
+        }
+      }
+
+      // climax counter-melody, an octave up and off the beat
+      if (mood === 'climax') { const cf = MOTIF[(n + 8) % 16]; if (cf) voice({ type: 'sine', freq: cf * 2, t: t + s * 0.5, atk: 0.01, dur: s * 1.6, gain: 0.06, dest: bus }); }
+
+      // a riser through the last bar of the breakdown, lifting into the climax
+      if (mood === 'break' && barInSec === 3 && bib === 0) noise({ ftype: 'bandpass', freq: 300, q: 0.6, t, dur: s * 4, gain: 0.1, sweep: 6000, dest: bus });
+    },
+  },
+  { // 1 TECTONIC I — STRATA: deep pulse → groans → shimmer → off-beat drive → top tick
     live: [], start() {}, stop() {},
     beat(n, t) {
       const s = 60 / bpm, { L1, L2, L3, L4 } = tiers();
