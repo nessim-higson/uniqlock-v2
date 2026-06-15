@@ -12,7 +12,7 @@
   #grid { position: absolute; inset: 0; display: grid; gap: 0; }
   .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #161618; }
   .cell .ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-    opacity: 0; transition: opacity 320ms ease; }
+    opacity: 0; clip-path: inset(0 0 0 0); transform-origin: center; backface-visibility: hidden; }
   .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 2; pointer-events: none; }
   .lab { position: absolute; left: 8px; top: 7px; z-index: 3; font-size: 11px; letter-spacing: 0.08em;
     font-weight: 500; color: #fff; background: rgba(0,0,0,0.42); padding: 2px 6px; border-radius: 3px;
@@ -152,7 +152,42 @@ CELL_IDS.forEach((id) => {
   el._layers = [a, b]; el._front = 0; el._flash = fl; el._lastSwap = -99;
 });
 function initImages() { CELL_IDS.forEach((id) => { const el = cells[id]; if (!pool.length) return; el._layers[0].src = nextImg(); el._layers[0].style.opacity = '1'; }); }
-function swapImage(el) { const f = el._front, b = 1 - f; const u = nextImg(); if (!u) return; el._layers[b].src = u; el._layers[b].style.opacity = '1'; el._layers[f].style.opacity = '0'; el._front = b; }
+
+// per-voice image transitions — each instrument changes its block a different
+// way, so you can see the orchestration. PULSE uses the crna 4-side pull.
+const SIDES = ['up', 'left', 'down', 'right'];
+const EASE = 'cubic-bezier(.4,.05,.2,1)';
+let pulseSide = 0;
+function doTransition(el, spec) {
+  const u = nextImg(); if (!u) return;
+  const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
+  back.src = u;
+  back.style.zIndex = '1'; front.style.zIndex = '0';
+  const beatMs = (60 / bpm) * 1000, dur = Math.max(80, Math.min(spec.dur, beatMs * 0.95));
+  let kind = spec.kind, side = null;
+  if (kind === 'pull') side = SIDES[pulseSide++ % SIDES.length];
+
+  if (kind === 'cut') {                                  // tick — hard percussive cut
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1';
+    void back.offsetWidth; front.style.opacity = '0'; el._front = bk; popFlash(el, 0.22, 110); return;
+  }
+  let initClip = 'inset(0 0 0 0)', initT = 'none', initO = '1';
+  if (kind === 'pull') initClip = side === 'up' ? 'inset(100% 0 0 0)' : side === 'down' ? 'inset(0 0 100% 0)' : side === 'left' ? 'inset(0 0 0 100%)' : 'inset(0 100% 0 0)';
+  else if (kind === 'wipe') initClip = 'inset(0 100% 0 0)';
+  else if (kind === 'scale') { initT = 'scale(1.16)'; initO = '0'; }
+  else if (kind === 'dissolve') initO = '0';
+  back.style.transition = 'none'; back.style.clipPath = initClip; back.style.transform = initT; back.style.opacity = initO;
+  void back.offsetWidth;
+  back.style.transition = `clip-path ${dur}ms ${EASE}, transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}`;
+  back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1';
+  if (kind === 'pull') {                                 // outgoing recedes (the crna feel)
+    front.style.transition = `transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}`;
+    const sh = side === 'up' ? 'translateY(-12%)' : side === 'down' ? 'translateY(12%)' : side === 'left' ? 'translateX(-12%)' : 'translateX(12%)';
+    front.style.transform = sh + ' scale(.92)'; front.style.opacity = '.5';
+  }
+  el._front = bk;
+  setTimeout(() => { front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0 0 0 0)'; }, dur + 40);
+}
 
 // layouts: track sizes (fr) + per-cell placement {c,r,cs,rs}. portrait via transpose().
 const L = {
@@ -211,15 +246,17 @@ function doBreathe(areas) {
 const AREAS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
 const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
 const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
-// peak = white-flash opacity, decay ms, swap = min beats between image cuts (null = flash only), strong = breathes
+// kind = the transition verb, dur ms, swap = min beats between image changes,
+// flash = white-pop opacity on the in-between (non-swap) beats so rhythm reads
 const VSPEC = {
-  pulse:   { peak: 0.34, decay: 440, swap: 2, strong: true },
-  groanA:  { peak: 0.24, decay: 1400, swap: 1, strong: true },
-  groanB:  { peak: 0.24, decay: 1400, swap: 1, strong: true },
-  shimmer: { peak: 0.50, decay: 240, swap: 4, strong: false },
-  drive:   { peak: 0.22, decay: 220, swap: null, strong: false },
-  tick:    { peak: 0.30, decay: 130, swap: null, strong: false },
+  pulse:   { kind: 'pull',     dur: 600,  swap: 2, flash: 0.16 },
+  groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.16 },
+  groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.16 },
+  shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.30 },
+  drive:   { kind: 'wipe',     dur: 240,  swap: 2, flash: 0.16 },
+  tick:    { kind: 'cut',      dur: 90,   swap: 2, flash: 0.22 },
 };
+const STRONG = new Set(['pulse', 'groanA', 'groanB']);
 const binding = {};
 let curSection = -1, beatFired = [];
 let mode = 'repack';
@@ -232,11 +269,12 @@ function popFlash(el, peak, decay) {
 function fire(vname, n, t, audioFn) {
   audioFn();
   const area = binding[vname], spec = VSPEC[vname];
-  beatFired.push({ area, strong: spec.strong });
+  beatFired.push({ area, strong: STRONG.has(vname) });
   setTimeout(() => {
     const el = cells[area];
-    popFlash(el, spec.peak, spec.decay);
-    if (spec.swap != null && n - el._lastSwap >= spec.swap) { swapImage(el); el._lastSwap = n; }
+    if (el.style.display === 'none') return;
+    if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; } // the instrument's transition
+    else popFlash(el, spec.flash, 260);                                              // in-between beat: subtle pop
   }, Math.max(0, (t - ctx.currentTime) * 1000));
 }
 function relabel() {
