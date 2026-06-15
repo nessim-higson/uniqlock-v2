@@ -208,11 +208,7 @@ function doTransition(el, spec) {
   void back.offsetWidth;
   back.style.transition = `clip-path ${dur}ms ${EASE}, transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}`;
   back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1';
-  if (kind === 'pull') {
-    front.style.transition = `transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}`;
-    const sh = side === 'up' ? 'translateY(-12%)' : side === 'down' ? 'translateY(12%)' : side === 'left' ? 'translateX(-12%)' : 'translateX(12%)';
-    front.style.transform = sh + ' scale(.92)'; front.style.opacity = '.5';
-  }
+  // the incoming reveals OVER a held outgoing — no recede, so no dark gap / flash
   el._front = bk;
   setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0 0 0 0)'; }, dur + 40);
 }
