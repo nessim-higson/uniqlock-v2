@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 19 — sound</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #08080a;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column;
+    justify-content: center; padding: 8vw; gap: 1.4vh; }
+  h1 { font-size: 12px; letter-spacing: 0.28em; opacity: 0.5; font-weight: 700; margin-bottom: 3vh; }
+  .pal { display: flex; align-items: center; gap: 4%; padding: 16px 0;
+    border-top: 1px solid #1c1c20; cursor: pointer; opacity: 0.5; transition: opacity 200ms; }
+  .pal:last-of-type { border-bottom: 1px solid #1c1c20; }
+  .pal:hover { opacity: 0.85; }
+  .pal.on { opacity: 1; }
+  .pal .n { font-size: 5vmin; font-weight: 700; letter-spacing: -0.01em; flex: 0 0 42%; line-height: 1.0; }
+  .pal.on .n { color: #cde; }
+  .pal .d { font-size: 1.7vmin; opacity: 0.55; letter-spacing: 0.02em; line-height: 1.5; flex: 1; }
+  #transport { display: flex; align-items: center; gap: 18px; margin-top: 4vh; }
+  .btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 15px;
+    flex: none; transition: background 160ms, color 160ms; }
+  .btn:hover { background: #fff; color: #111; }
+  #pulse { width: 12px; height: 12px; border-radius: 50%; background: #fff; opacity: 0.2;
+    transition: opacity 90ms, transform 90ms; }
+  #fader { position: relative; width: 38vw; max-width: 380px; height: 30px; cursor: pointer; touch-action: none; }
+  #fader .track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; margin-top: -1px; background: rgba(255,255,255,0.2); }
+  #fader .knob { position: absolute; top: 50%; width: 11px; height: 22px; border-radius: 3px; background: #fff; transform: translate(-50%,-50%); }
+  #bpmlab { font-size: 12px; opacity: 0.6; font-variant-numeric: tabular-nums; letter-spacing: 0.1em; min-width: 6ch; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff; opacity: 0.5; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2.4vmin; background: #08080a; cursor: pointer;
+    transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.2vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <h1>SOUND — FOUR DIRECTIONS · TAP A NAME TO AUDITION</h1>
+  <div class="pal" data-i="0"><div class="n">DUB CHAMBER</div><div class="d">deep sub, sparse clicks, a detuned minor chord drenched in cavernous reverb — slow, hypnotic, dark</div></div>
+  <div class="pal" data-i="1"><div class="n">NOCTURNE</div><div class="d">no beat — slow shifting drones and a distant piano figure in a minor mode, cinematic and spacious</div></div>
+  <div class="pal" data-i="2"><div class="n">MACHINE</div><div class="d">a low throbbing pulse, metallic FM hits and noise sweeps — tense, mechanical, dystopian</div></div>
+  <div class="pal" data-i="3"><div class="n">GRAIN</div><div class="d">scattered pitched grains over a bowed cello drone — glitchy, organic, cerebral (The Books)</div></div>
+  <div id="transport">
+    <div id="play" class="btn">❚❚</div>
+    <div id="pulse"></div>
+    <div id="fader"><div class="track"></div><div class="knob"></div></div>
+    <div id="bpmlab">88 BPM</div>
+  </div>
+</div>
+<div id="label">COMP 19 — SOUND · <a href="../">back</a></div>
+<div id="overlay">
+  <div class="wordmark">SOUND</div>
+  <div class="prompt">four darker, more sophisticated directions to audition and compare.<br>
+  tap a name to switch worlds; slide for tempo. all generative, all live.</div>
+  <div class="prompt">tap to enter, sound on</div>
+</div>
+
+<script type="module">
+const playBtn = document.getElementById('play');
+const pulse = document.getElementById('pulse');
+const fader = document.getElementById('fader');
+const knob = document.querySelector('#fader .knob');
+const bpmlab = document.getElementById('bpmlab');
+const overlay = document.getElementById('overlay');
+const palEls = [...document.querySelectorAll('.pal')];
+
+let ctx, master, bus, space;
+let bpm = 88, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
+const BPM_MIN = 60, BPM_MAX = 130;
+
+// ── shared instruments ──
+function makeIR(sec) { const len = ctx.sampleRate * sec, b = ctx.createBuffer(2, len, ctx.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2); } return b; }
+function voice(o) {
+  const osc = ctx.createOscillator(); osc.type = o.type || 'sawtooth'; osc.frequency.value = o.freq; osc.detune.value = o.detune || 0;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + (o.atk || 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  let tail = osc;
+  if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; if (o.q) f.Q.value = o.q; osc.connect(f); tail = f; }
+  tail.connect(g); g.connect(o.dest || bus);
+  osc.start(o.t); osc.stop(o.t + o.dur + 0.05);
+  return osc;
+}
+let noiseBuf;
+function noise(o) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = o.ftype || 'highpass'; f.frequency.value = o.freq || 6000; if (o.q) f.Q.value = o.q;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  s.connect(f); f.connect(g); g.connect(o.dest || bus); s.start(o.t); s.stop(o.t + o.dur + 0.05);
+  if (o.sweep) f.frequency.exponentialRampToValueAtTime(o.sweep, o.t + o.dur);
+}
+const D = { c2: 65.41, d2: 73.42, f2: 87.31, a2: 110, c3: 130.81, d3: 146.83, e3: 164.81, f3: 174.61, g3: 196, a3: 220, bb3: 233.08, c4: 261.63, d4: 293.66, f4: 349.23, a4: 440 };
+
+// ── the four palettes ──
+const palettes = [
+  { // 0 DUB CHAMBER
+    live: [], start() {}, stop() {},
+    beat(n, t) {
+      const s = 60 / bpm;
+      if (n % 4 === 0) voice({ type: 'sine', freq: D.d2, t, atk: 0.01, dur: s * 2.2, gain: 0.4, dest: master });
+      if (n % 2 === 1) { // the dub chord on the off-beat, into reverb
+        [D.d3, D.f3, D.a3, D.c4].forEach((f) => [-8, 8].forEach((c) => voice({ type: 'sawtooth', freq: f, detune: c, t: t + s * 0.5, atk: 0.008, dur: s * 0.9, gain: 0.05, lp: 900, q: 4, dest: bus })));
+      }
+      if (n % 4 === 2) noise({ ftype: 'bandpass', freq: 1900, q: 1.2, t, dur: 0.04, gain: 0.18, dest: bus });
+    },
+  },
+  { // 1 NOCTURNE — drone, sparse piano
+    live: [],
+    start() {
+      [D.d2, D.a2, D.d3].forEach((f, i) => {
+        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = i * 4 - 4;
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600;
+        const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.linearRampToValueAtTime(0.07, ctx.currentTime + 2);
+        o.connect(lp); lp.connect(g); g.connect(bus); o.start();
+        this.live.push(o, () => g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 1.5));
+      });
+    },
+    stop() { this.live.forEach((x) => { if (typeof x === 'function') x(); else try { x.stop(ctx.currentTime + 1.6); } catch (e) {} }); this.live = []; },
+    beat(n, t) {
+      const s = 60 / bpm;
+      // sparse distant piano-ish notes from D minor, long reverb tails
+      if (n % 6 === 0 || n % 13 === 5) { const notes = [D.d4, D.f4, D.a4, D.c4]; voice({ type: 'triangle', freq: notes[(n / 3 | 0) % notes.length], t, atk: 0.02, dur: s * 4, gain: 0.12, dest: bus }); }
+      if (n % 16 === 0) voice({ type: 'sine', freq: D.c2, t, atk: 1, dur: s * 8, gain: 0.25, dest: master }); // swell
+    },
+  },
+  { // 2 MACHINE — industrial pulse
+    live: [], start() {}, stop() {},
+    beat(n, t) {
+      const s = 60 / bpm;
+      voice({ type: 'sawtooth', freq: D.d2, t, atk: 0.002, dur: s * 0.35, gain: 0.3, lp: 420, q: 6, dest: master }); // throb
+      if (n % 4 === 2) { // metallic FM-ish hit (two high oscs, dissonant)
+        [1, 2.76].forEach((r, i) => voice({ type: 'square', freq: 220 * r, t, atk: 0.001, dur: 0.18, gain: 0.06 - i * 0.02, lp: 5000, dest: bus }));
+      }
+      if (n % 8 === 0) noise({ ftype: 'bandpass', freq: 400, q: 0.7, t, dur: s * 1.4, gain: 0.12, sweep: 4000, dest: bus }); // rising sweep
+      if (n % 8 === 6) { [D.d3, D.e3].forEach((f) => voice({ type: 'sawtooth', freq: f, t, atk: 0.005, dur: 0.4, gain: 0.05, lp: 1400, dest: bus })); } // dissonant cluster
+    },
+  },
+  { // 3 GRAIN — granular over a cello drone
+    live: [],
+    start() {
+      const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = D.d2;
+      const vib = ctx.createOscillator(); vib.frequency.value = 4.5; const vg = ctx.createGain(); vg.gain.value = 1.6; vib.connect(vg); vg.connect(o.frequency);
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+      const g = ctx.createGain(); g.gain.value = 0.0001; g.gain.linearRampToValueAtTime(0.09, ctx.currentTime + 1.5);
+      o.connect(lp); lp.connect(g); g.connect(bus); o.start(); vib.start();
+      this.live.push(o, vib, () => g.gain.linearRampToValueAtTime(0.0001, ctx.currentTime + 1));
+    },
+    stop() { this.live.forEach((x) => { if (typeof x === 'function') x(); else try { x.stop(ctx.currentTime + 1.1); } catch (e) {} }); this.live = []; },
+    beat(n, t) {
+      const s = 60 / bpm;
+      const scale = [D.d4, D.f4, D.a4, D.c4, D.d3 * 2];
+      const grains = 3 + (n % 3);
+      for (let i = 0; i < grains; i++) {
+        const gt = t + Math.random() * s * 0.9;
+        voice({ type: Math.random() < 0.5 ? 'triangle' : 'sine', freq: scale[(Math.random() * scale.length) | 0] * (Math.random() < 0.3 ? 2 : 1), t: gt, atk: 0.004, dur: 0.06 + Math.random() * 0.12, gain: 0.05 + Math.random() * 0.05, dest: bus });
+      }
+    },
+  },
+];
+let active = null;
+
+function setPalette(i) {
+  if (active === palettes[i]) return;
+  if (active) active.stop();
+  active = palettes[i];
+  active.start();
+  palEls.forEach((el, j) => el.classList.toggle('on', j === i));
+}
+
+function onBeat() {
+  beatN++;
+  if (active && ctx) active.beat(beatN, ctx.currentTime);
+  pulse.style.opacity = '1'; pulse.style.transform = 'scale(1.6)';
+  setTimeout(() => { pulse.style.opacity = '0.2'; pulse.style.transform = 'scale(1)'; }, 90);
+}
+function loop(t) {
+  if (entered && running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); }
+  lastT = t;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// controls
+function paintFader() { const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN); knob.style.left = (p * 100) + '%'; bpmlab.textContent = Math.round(bpm) + ' BPM'; }
+let drag = false;
+function bpmFromX(x) { const r = fader.getBoundingClientRect(); bpm = BPM_MIN + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (BPM_MAX - BPM_MIN); paintFader(); }
+fader.addEventListener('pointerdown', (e) => { drag = true; fader.setPointerCapture(e.pointerId); bpmFromX(e.clientX); });
+fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); });
+fader.addEventListener('pointerup', () => { drag = false; });
+playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
+palEls.forEach((el) => el.addEventListener('click', () => { if (entered) setPalette(+el.dataset.i); }));
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  ctx = new AudioContext();
+  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  space = ctx.createConvolver(); space.buffer = makeIR(3.2);
+  const rev = ctx.createGain(); rev.gain.value = 0.34; space.connect(rev); rev.connect(master);
+  bus = ctx.createGain(); bus.connect(master); bus.connect(space);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  await ctx.resume();
+  paintFader();
+  setPalette(0);
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+});
+</script>
+
+</body>
+</html>
