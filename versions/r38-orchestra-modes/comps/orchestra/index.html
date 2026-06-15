@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 20 — orchestra</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
+
+  /* the grid — gapless, square-cornered, grayscale; placement is JS-driven so
+     the layout can mutate with the music */
+  #grid { position: absolute; inset: 0; display: grid; gap: 0; }
+  .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+  .lab { position: absolute; left: 8px; top: 7px; font-size: 11px; letter-spacing: 0.08em;
+    font-weight: 500; color: #fff; background: rgba(0,0,0,0.34); padding: 2px 6px; border-radius: 3px;
+    display: none; pointer-events: none; }
+  #grid.labels .lab { display: inline-block; }
+
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
+    font-size: 11px; letter-spacing: 0.14em; font-variant-numeric: tabular-nums; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
+    font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+
+  #modes { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; max-width: 92vw;
+    background: rgba(0,0,0,0.4); backdrop-filter: blur(6px); padding: 6px;
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 20px; }
+  .chip { font-size: 11px; letter-spacing: 0.08em; color: #fff; opacity: 0.5; padding: 5px 10px;
+    border-radius: 14px; cursor: pointer; user-select: none; white-space: nowrap; transition: opacity 150ms, background 150ms; }
+  .chip:hover { opacity: 0.85; }
+  .chip.on { opacity: 1; background: rgba(255,255,255,0.18); }
+  .chip.sep { opacity: 0.25; pointer-events: none; padding: 5px 2px; }
+
+  #transport { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 8;
+    display: flex; align-items: center; gap: 16px; background: rgba(0,0,0,0.35); backdrop-filter: blur(6px);
+    padding: 10px 16px; border: 1px solid rgba(255,255,255,0.16); border-radius: 30px; }
+  .btn { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.4);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px;
+    flex: none; transition: background 160ms, color 160ms; }
+  .btn:hover { background: #fff; color: #111; }
+  #fader { position: relative; width: 40vw; max-width: 320px; height: 28px; cursor: pointer; touch-action: none; }
+  #fader .track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; margin-top: -1px; background: rgba(255,255,255,0.25); }
+  #fader .knob { position: absolute; top: 50%; width: 11px; height: 22px; border-radius: 3px; background: #fff; transform: translate(-50%,-50%); }
+  #bpmlab { font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums; letter-spacing: 0.08em; min-width: 7ch; }
+
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2.4vmin; background: #000; cursor: pointer;
+    transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.2vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; max-width: 62ch; }
+</style>
+</head>
+<body>
+
+<div id="grid" class="labels">
+  <div class="cell" id="c-pulse"><span class="lab"></span></div>
+  <div class="cell" id="c-ga"><span class="lab"></span></div>
+  <div class="cell" id="c-gb"><span class="lab"></span></div>
+  <div class="cell" id="c-shim"><span class="lab"></span></div>
+  <div class="cell" id="c-drive"><span class="lab"></span></div>
+  <div class="cell" id="c-tick"><span class="lab"></span></div>
+</div>
+
+<div id="modes">
+  <div class="chip" data-mode="fixed">FIXED</div>
+  <div class="chip" data-mode="morph">MORPH</div>
+  <div class="chip on" data-mode="breathe">BREATHE</div>
+  <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
+  <div class="chip" data-mode="repack">REPACK</div>
+  <div class="chip sep">·</div>
+  <div class="chip on" id="labelChip">LABELS</div>
+</div>
+
+<div id="status">ORCHESTRA · STRATA</div>
+<div id="label">COMP 20 — ORCHESTRA · <a href="../">back</a></div>
+<div id="transport">
+  <div id="play" class="btn">❚❚</div>
+  <div id="fader"><div class="track"></div><div class="knob"></div></div>
+  <div id="bpmlab">104 BPM</div>
+</div>
+
+<div id="overlay">
+  <div class="wordmark">ORCHESTRA</div>
+  <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns a
+  block; the block lights when its voice plays — and the grid itself changes shape with the music.
+  switch modes up top (or keys 1–5); L toggles labels; drag the tempo. sound on.</div>
+  <div class="prompt">tap to enter</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+const playBtn = document.getElementById('play');
+const fader = document.getElementById('fader');
+const knob = document.querySelector('#fader .knob');
+const bpmlab = document.getElementById('bpmlab');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const grid = document.getElementById('grid');
+
+let ctx, master, bus, space, noiseBuf;
+let bpm = 104, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
+const BPM_MIN = 60, BPM_MAX = 130;
+
+// ── shared instruments (same engine as the sound comp) ──
+function makeIR(sec) { const len = ctx.sampleRate * sec, b = ctx.createBuffer(2, len, ctx.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2); } return b; }
+function voice(o) {
+  const osc = ctx.createOscillator(); osc.type = o.type || 'sawtooth'; osc.frequency.value = o.freq; osc.detune.value = o.detune || 0;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + (o.atk || 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  let tail = osc;
+  if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; if (o.q) f.Q.value = o.q; osc.connect(f); tail = f; }
+  tail.connect(g); g.connect(o.dest || bus);
+  osc.start(o.t); osc.stop(o.t + o.dur + 0.05);
+}
+function noise(o) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = o.ftype || 'highpass'; f.frequency.value = o.freq || 6000; if (o.q) f.Q.value = o.q;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  s.connect(f); f.connect(g); g.connect(o.dest || bus); s.start(o.t); s.stop(o.t + o.dur + 0.05);
+  if (o.sweep) f.frequency.exponentialRampToValueAtTime(o.sweep, o.t + o.dur);
+}
+const D = { d2: 73.42, f2: 87.31, a4: 440 };
+function subThud(t, f0, f1, dur, gain) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + 0.09);
+  const o2 = ctx.createOscillator(); o2.type = 'triangle';
+  o2.frequency.setValueAtTime(f0 * 2, t); o2.frequency.exponentialRampToValueAtTime(Math.max(24, f1 * 2), t + 0.09);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const g2 = ctx.createGain(); g2.gain.value = 0.12;
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+  o.start(t); o.stop(t + dur + 0.05); o2.start(t); o2.stop(t + dur + 0.05);
+}
+
+// ── the grid model ──
+const cells = { pulse: document.getElementById('c-pulse'), ga: document.getElementById('c-ga'), gb: document.getElementById('c-gb'), shim: document.getElementById('c-shim'), drive: document.getElementById('c-drive'), tick: document.getElementById('c-tick') };
+const CELL_IDS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
+const BASE = { ga: '#141416', drive: '#222226', tick: '#303036', pulse: '#42424a', gb: '#56565e', shim: '#6c6c74' };
+CELL_IDS.forEach((k) => { cells[k].dataset.base = BASE[k]; cells[k].style.backgroundColor = BASE[k]; });
+
+// layouts: track sizes (fr) + per-cell placement {c,r,cs,rs}. cells absent from
+// a layout are hidden. portrait reuses these via transpose().
+const L = {
+  broadcast: { cols: [1, 2, 1], rows: [0.6, 1.6, 1.1], place: { tick: { c: 1, r: 1, cs: 3 }, ga: { c: 1, r: 2 }, pulse: { c: 2, r: 2 }, shim: { c: 3, r: 2 }, drive: { c: 1, r: 3, cs: 2 }, gb: { c: 3, r: 3 } } },
+  columns:   { cols: [1.6, 1, 1], rows: [1, 1, 1], place: { pulse: { c: 1, r: 1, rs: 3 }, tick: { c: 2, r: 1, cs: 2 }, ga: { c: 2, r: 2 }, shim: { c: 3, r: 2 }, drive: { c: 2, r: 3 }, gb: { c: 3, r: 3 } } },
+  stack:     { cols: [1, 1, 1], rows: [0.7, 1.6, 1], place: { tick: { c: 1, r: 1, cs: 3 }, ga: { c: 1, r: 2 }, pulse: { c: 2, r: 2 }, gb: { c: 3, r: 2 }, drive: { c: 1, r: 3, cs: 2 }, shim: { c: 3, r: 3 } } },
+  grid6:     { cols: [1, 1, 1], rows: [1, 1], place: { tick: { c: 1, r: 1 }, shim: { c: 2, r: 1 }, ga: { c: 3, r: 1 }, pulse: { c: 1, r: 2 }, drive: { c: 2, r: 2 }, gb: { c: 3, r: 2 } } },
+  bands:     { cols: [1, 1], rows: [1, 1.4, 1], place: { tick: { c: 1, r: 1, cs: 2 }, pulse: { c: 1, r: 2, cs: 2 }, drive: { c: 1, r: 3, cs: 2 } } },
+  big:       { cols: [1], rows: [1], place: { pulse: { c: 1, r: 1 } } },
+  l3:        { cols: [1, 1], rows: [1.4, 1], place: { pulse: { c: 1, r: 1, cs: 2 }, ga: { c: 1, r: 2 }, gb: { c: 2, r: 2 } } },
+  l4:        { cols: [1, 1], rows: [1, 1], place: { pulse: { c: 1, r: 1 }, ga: { c: 2, r: 1 }, gb: { c: 1, r: 2 }, shim: { c: 2, r: 2 } } },
+  l5:        { cols: [1, 1, 1], rows: [1, 1], place: { pulse: { c: 1, r: 1 }, ga: { c: 2, r: 1 }, gb: { c: 3, r: 1 }, shim: { c: 1, r: 2 }, drive: { c: 2, r: 2, cs: 2 } } },
+};
+function transpose(lay) {
+  const place = {};
+  for (const k in lay.place) { const p = lay.place[k]; place[k] = { c: p.r, r: p.c, cs: p.rs || 1, rs: p.cs || 1 }; }
+  return { cols: lay.rows, rows: lay.cols, place };
+}
+const isPortrait = () => innerHeight > innerWidth;
+
+let baseCols = [1], baseRows = [1], curPlace = {}, lastLayoutKey = '';
+function applyLayout(lay, key) {
+  if (key === lastLayoutKey) return;
+  lastLayoutKey = key;
+  const o = isPortrait() ? transpose(lay) : lay;
+  grid.style.transition = 'grid-template-columns .5s ease, grid-template-rows .5s ease';
+  grid.style.gridTemplateColumns = o.cols.map((f) => f + 'fr').join(' ');
+  grid.style.gridTemplateRows = o.rows.map((f) => f + 'fr').join(' ');
+  CELL_IDS.forEach((id) => {
+    const p = o.place[id], el = cells[id];
+    if (!p) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.style.gridColumn = p.c + ' / span ' + (p.cs || 1);
+    el.style.gridRow = p.r + ' / span ' + (p.rs || 1);
+  });
+  baseCols = [...o.cols]; baseRows = [...o.rows]; curPlace = o.place;
+}
+
+let breatheTO = 0;
+function doBreathe(areas) {
+  if (!areas.length) return;
+  const cols = [...baseCols], rows = [...baseRows];
+  areas.forEach((a) => { const p = curPlace[a]; if (!p) return; cols[p.c - 1] = baseCols[p.c - 1] * 1.8; rows[p.r - 1] = baseRows[p.r - 1] * 1.7; });
+  grid.style.transition = 'grid-template-columns .10s ease-out, grid-template-rows .10s ease-out';
+  grid.style.gridTemplateColumns = cols.map((f) => f + 'fr').join(' ');
+  grid.style.gridTemplateRows = rows.map((f) => f + 'fr').join(' ');
+  clearTimeout(breatheTO);
+  const back = Math.max(120, (60 / bpm) * 1000 * 0.6);
+  breatheTO = setTimeout(() => {
+    grid.style.transition = 'grid-template-columns ' + back + 'ms ease, grid-template-rows ' + back + 'ms ease';
+    grid.style.gridTemplateColumns = baseCols.map((f) => f + 'fr').join(' ');
+    grid.style.gridTemplateRows = baseRows.map((f) => f + 'fr').join(' ');
+  }, 90);
+}
+
+// ── the voices, their flash, and the rotating voice → block binding ──
+const AREAS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
+const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
+const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
+const VSPEC = {
+  pulse:   { peak: '#f0f0f4', decay: 440 }, groanA: { peak: '#cfcfd6', decay: 1500 },
+  groanB:  { peak: '#cfcfd6', decay: 1500 }, shimmer: { peak: '#ffffff', decay: 240 },
+  drive:   { peak: '#b6b6be', decay: 220 }, tick: { peak: '#dadae0', decay: 130 },
+};
+const binding = {};
+let curSection = -1, beatFired = [];
+let mode = 'breathe';
+
+function flash(area, peak, decay) {
+  const el = cells[area]; if (!el) return;
+  el.style.transition = 'none'; el.style.backgroundColor = peak; void el.offsetWidth;
+  el.style.transition = 'background-color ' + decay + 'ms cubic-bezier(.2,.6,.2,1)';
+  el.style.backgroundColor = el.dataset.base;
+}
+function fire(vname, t, audioFn) {
+  audioFn();
+  const area = binding[vname], spec = VSPEC[vname];
+  beatFired.push(area);
+  setTimeout(() => flash(area, spec.peak, spec.decay), Math.max(0, (t - ctx.currentTime) * 1000));
+}
+function relabel() {
+  const a2v = {}; VOICES.forEach((v) => { a2v[binding[v]] = v; });
+  CELL_IDS.forEach((id) => { cells[id].querySelector('.lab').textContent = a2v[id] ? NAME[a2v[id]] : ''; });
+}
+function activeCount() { return 1 + (bpm >= 74 ? 2 : 0) + (bpm >= 88 ? 1 : 0) + (bpm >= 102 ? 1 : 0) + (bpm >= 116 ? 1 : 0); }
+
+function applyModeLayout() {
+  const sec = Math.max(0, curSection);
+  if (mode === 'fixed' || mode === 'breathe') applyLayout(L.broadcast, 'broadcast');
+  else if (mode === 'morph') { const a = [L.big, L.bands, L.grid6, L.stack]; const i = sec % a.length; applyLayout(a[i], 'morph' + i); }
+  else if (mode === 'repack') { const a = [L.broadcast, L.columns, L.stack, L.grid6]; const i = sec % a.length; applyLayout(a[i], 'repack' + i); }
+  else if (mode === 'subdivide') { const c = activeCount(); const m = { 1: L.big, 3: L.l3, 4: L.l4, 5: L.l5, 6: L.grid6 }; applyLayout(m[c] || L.grid6, 'sub' + c); }
+}
+
+function beat(n, t) {
+  const s = 60 / bpm;
+  const L1 = bpm >= 74, L2 = bpm >= 88, L3 = bpm >= 102, L4 = bpm >= 116;
+  const section = Math.floor((n - 1) / 32);
+  if (section !== curSection) { curSection = section; VOICES.forEach((v, i) => { binding[v] = AREAS[(i + section) % AREAS.length]; }); relabel(); }
+
+  fire('pulse', t, () => subThud(t, 50, 30, s * 1.8, 0.72));
+  if (L1 && n % 8 === 0) fire('groanA', t, () => voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }));
+  if (L1 && n % 8 === 4) fire('groanB', t, () => voice({ type: 'sawtooth', freq: D.f2, detune: 5, t, atk: 1.6, dur: s * 7, gain: 0.05, lp: 240, dest: bus }));
+  if (L2 && n % 4 === 3) fire('shimmer', t, () => voice({ type: 'sine', freq: D.a4 * 1.5, t, atk: 0.05, dur: s * 4, gain: 0.035, dest: bus }));
+  if (L3 && n % 2 === 1) fire('drive', t, () => subThud(t, 46, 40, s * 0.85, 0.32));
+  if (L4 && n % 2 === 0) fire('tick', t, () => noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }));
+}
+
+function onBeat() {
+  beatN++; beatFired = [];
+  if (ctx) beat(beatN, ctx.currentTime);
+  applyModeLayout();
+  if (mode === 'breathe') doBreathe(beatFired);
+  statusEl.textContent = 'ORCHESTRA · STRATA · ' + mode.toUpperCase() + ' · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
+}
+function loop(t) {
+  if (entered && running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); }
+  lastT = t;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ── controls ──
+function setMode(m) { mode = m; lastLayoutKey = ''; document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.classList.toggle('on', c.dataset.mode === m)); applyModeLayout(); }
+document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventListener('click', () => setMode(c.dataset.mode)));
+const labelChip = document.getElementById('labelChip');
+function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
+labelChip.addEventListener('click', toggleLabels);
+const MODE_KEYS = { '1': 'fixed', '2': 'morph', '3': 'breathe', '4': 'subdivide', '5': 'repack' };
+document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); });
+
+function paintFader() { const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN); knob.style.left = (p * 100) + '%'; bpmlab.textContent = Math.round(bpm) + ' BPM'; }
+let drag = false;
+function bpmFromX(x) { const r = fader.getBoundingClientRect(); bpm = BPM_MIN + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (BPM_MAX - BPM_MIN); paintFader(); }
+fader.addEventListener('pointerdown', (e) => { drag = true; fader.setPointerCapture(e.pointerId); bpmFromX(e.clientX); });
+fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); });
+fader.addEventListener('pointerup', () => { drag = false; });
+playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
+window.addEventListener('resize', () => { lastLayoutKey = ''; applyModeLayout(); });
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  ctx = new AudioContext();
+  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  space = ctx.createConvolver(); space.buffer = makeIR(3.2);
+  const rev = ctx.createGain(); rev.gain.value = 0.34; space.connect(rev); rev.connect(master);
+  bus = ctx.createGain(); bus.connect(master); bus.connect(space);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  await ctx.resume();
+  paintFader();
+  applyModeLayout();
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+});
+</script>
+
+</body>
+</html>
