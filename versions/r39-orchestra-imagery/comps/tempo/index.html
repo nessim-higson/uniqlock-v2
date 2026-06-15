@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 17 — tempo</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; touch-action: none; }
+  #stage { position: absolute; inset: 0; background: #000; }
+  .layer { position: absolute; inset: 0; overflow: hidden; background: #000;
+    will-change: transform, clip-path, opacity; }
+  .layer img, .layer video { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  #metro { position: fixed; left: 3vmin; top: 3vmin; width: 4.75vmin; height: 4.75vmin;
+    z-index: 6; background: #fff; display: none; align-items: center; justify-content: center;
+    transition: transform 120ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 1.25vmin; letter-spacing: 0.04em; color: #111; }
+
+  /* the tempo HUD — nternet-style: a big BPM you drag */
+  #tempo { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 5; text-align: center; color: #fff; mix-blend-mode: difference; pointer-events: none; }
+  #tempo .bpm { font-size: 13vmin; font-weight: 700; line-height: 0.9; font-variant-numeric: tabular-nums; }
+  #tempo .lab { font-size: 1.7vmin; letter-spacing: 0.34em; opacity: 0.8; margin-top: 1vh; }
+
+  /* the controller — a deck dock for tempo + music */
+  #dock { position: fixed; left: 50%; bottom: 3.5vh; transform: translateX(-50%); z-index: 8;
+    display: flex; align-items: center; gap: 18px; padding: 12px 18px; border-radius: 999px;
+    background: rgba(18,18,18,0.62); backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.12); color: #fff; user-select: none;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  #dock.hide { opacity: 0; pointer-events: none; }
+  .btn { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px;
+    flex: none; transition: background 160ms, color 160ms; }
+  .btn:hover { background: #fff; color: #111; }
+  .btn.off { opacity: 0.45; }
+  #read { min-width: 70px; text-align: center; line-height: 1; }
+  #read b { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #read small { display: block; font-size: 9px; letter-spacing: 0.24em; opacity: 0.5; margin-top: 3px; }
+  #fader { position: relative; width: 44vw; max-width: 440px; height: 38px; cursor: pointer; flex: none; touch-action: none; }
+  #fader .track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; margin-top: -1px;
+    background: rgba(255,255,255,0.22); }
+  #fader .fillline { position: absolute; top: 50%; left: 0; height: 2px; margin-top: -1px; background: #fff; }
+  #fader .knob { position: absolute; top: 50%; width: 12px; height: 26px; border-radius: 3px;
+    background: #fff; transform: translate(-50%, -50%); box-shadow: 0 1px 6px rgba(0,0,0,0.5); }
+  #fader .ticks { position: absolute; inset: 0; }
+  #fader .ticks i { position: absolute; top: 50%; width: 1px; height: 7px; margin-top: -3.5px;
+    background: rgba(255,255,255,0.2); }
+
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em; font-variant-numeric: tabular-nums; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 6vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 2.4vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/CustomEase.min.js"></script>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="metro"><span>IAAH</span></div>
+<div id="dock" class="hide">
+  <div id="play" class="btn" title="play / pause">❚❚</div>
+  <div id="snd" class="btn" title="sound">♪</div>
+  <div id="read"><b>60</b><small>BPM</small></div>
+  <div id="fader"><div class="track"></div><div class="fillline"></div><div class="ticks"></div><div class="knob"></div></div>
+</div>
+<div id="label">COMP 17 — TEMPO · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">TEMPO</div>
+  <div class="prompt">a deck for the metronome. slide the fader to set the beat — 30 to 180 —
+  and the whole piece, and a lo-fi house bed built live, speed up or slow with you.
+  play/pause and sound on the left.</div>
+  <div class="prompt">tap to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { loadImageryManifest } from '../../js/data.js';
+import { getClip, playClip, pickClipIdx, warmClips } from '../../js/pieces.js';
+
+window.CustomEase && window.gsap.registerPlugin(window.CustomEase);
+window.CustomEase && window.CustomEase.create('pageTransition', 'M0,0 C0.38,0.05 0.48,0.58 0.65,0.82 0.82,1 1,1 1,1');
+const gsap = window.gsap;
+
+const stage = document.getElementById('stage');
+const metro = document.getElementById('metro');
+const dock = document.getElementById('dock');
+const readEl = document.querySelector('#read b');
+const fader = document.getElementById('fader');
+const knob = document.querySelector('#fader .knob');
+const fillLine = document.querySelector('#fader .fillline');
+const playBtn = document.getElementById('play');
+const sndBtn = document.getElementById('snd');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+
+// ── free tempo engine (decoupled from the wall clock) ──
+let bpm = 60;
+const BPM_MIN = 30, BPM_MAX = 180;
+let phase = 0;       // beats
+let beatN = 0;
+let lastT = 0;
+let entered = false;
+let running = true;  // play/pause
+
+// ── audio: a first INTERPRETATION of the references (DJ Seinfeld / Ross from
+// Friends lo-fi house warmth; The Books / Efterklang collage texture) —
+// generative and tempo-locked. Swung dusty drums, a soft sub, detuned hazy
+// chord stabs through a warm filter, over a continuous vinyl-crackle bed.
+let ctx = null, master = null, warmth = null, space = null, muted = false;
+let noiseBuf = null;
+const SWING = 0.58;  // shuffle: the off-beat lands late
+const hz = (t) => t + (Math.random() - 0.5) * 0.014;     // humanize: ±7ms timing
+const vary = (g) => g * (0.82 + Math.random() * 0.36);   // humanize: velocity
+
+// jazzy nostalgic vamp — 4 chords, 2 beats each (8-beat bar). [root, then voicing]
+const PROG = [
+  { root: 110.00, notes: [220.00, 261.63, 329.63, 392.00] }, // Am7
+  { root: 87.31,  notes: [174.61, 261.63, 329.63, 440.00] }, // Fmaj7
+  { root: 130.81, notes: [196.00, 261.63, 329.63, 392.00] }, // Cmaj7/G
+  { root: 98.00,  notes: [196.00, 246.94, 293.66, 392.00] }, // G
+];
+
+// a PERSISTENT melody — A-minor pentatonic motif over the 8-beat bar, looping
+// and lightly varying so there's always a tune to follow.
+const PENTA = [220.00, 261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33];
+const MOTIF = [5, 4, 6, 4, 3, 4, 2, 4];   // indices into PENTA, one per beat
+const GRACE = [0, 0, 1, 0, 0, 1, 0, 0];   // add a passing eighth on these beats
+
+function kick(t) {
+  const o = ctx.createOscillator(); const g = ctx.createGain();
+  o.frequency.setValueAtTime(140, t);
+  o.frequency.exponentialRampToValueAtTime(48, t + 0.11);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.55, t + 0.006);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.26);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.28);
+}
+function hat(t, gain) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+  s.connect(hp); hp.connect(g); g.connect(warmth); s.start(t); s.stop(t + 0.05);
+}
+function sub(t, f, dur) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.value = f;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.34, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + dur + 0.05);
+}
+function stab(t, notes, dur) {
+  notes.forEach((f) => {
+    [-7, 7].forEach((cents) => {                 // detuned pair = hazy/nostalgic
+      const o = ctx.createOscillator(); o.type = 'sawtooth';
+      o.frequency.value = f * Math.pow(2, cents / 1200);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.05, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(warmth); o.start(t); o.stop(t + dur + 0.05);
+    });
+  });
+}
+// a soft lead voice — two slightly-detuned triangles with vibrato, gentle
+// attack and a long tail into the reverb. this carries the tune.
+function lead(t, f, dur, gain) {
+  const vib = ctx.createOscillator(); vib.frequency.value = 5.2;        // vibrato
+  const vibG = ctx.createGain(); vibG.gain.value = f * 0.006;
+  vib.connect(vibG);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(gain, t + 0.03);                        // soft attack
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);                  // long tail
+  [-5, 6].forEach((cents) => {
+    const o = ctx.createOscillator(); o.type = 'triangle';
+    o.frequency.value = f * Math.pow(2, cents / 1200);
+    vibG.connect(o.frequency);
+    o.connect(g); o.start(t); o.stop(t + dur + 0.1);
+  });
+  g.connect(warmth);
+  vib.start(t); vib.stop(t + dur + 0.1);
+}
+function makeIR(seconds) {
+  const len = ctx.sampleRate * seconds;
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+  return buf;
+}
+function startBed() {
+  // vinyl crackle / tape hiss — the dust under everything (looped noise)
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.03 ? 1 : 0.12);
+  const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 3500; bp.Q.value = 0.6;
+  const g = ctx.createGain(); g.gain.value = 0.05;
+  s.connect(bp); bp.connect(g); g.connect(master); s.start();
+}
+// scheduled on each beat; every offset is a fraction of the beat, so the
+// whole groove stretches/compresses with the tempo dial.
+function kit(n) {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  const beatSec = 60 / bpm;
+  const chord = PROG[(Math.floor(n / 2)) % PROG.length];
+  const bar = n % 8;
+  kick(t);
+  hat(hz(t + beatSec * SWING), vary(0.1));   // swung off-beat hat
+  hat(hz(t), vary(0.035));                    // soft hat on the beat
+  if (n % 2 === 0) { sub(t, chord.root, beatSec * 1.7); stab(hz(t + beatSec * 0.02), chord.notes, beatSec * 1.5); }
+  if (n % 4 === 2) hat(hz(t + beatSec * 0.25), vary(0.045)); // ghost shuffle
+
+  // the persistent melody — one motif note per beat, an octave up, with the
+  // occasional passing eighth, humanized in time and touch
+  const f = PENTA[MOTIF[bar] % PENTA.length] * 2;
+  lead(hz(t), f, beatSec * 1.6, vary(0.12));
+  if (GRACE[bar]) {
+    const gf = PENTA[(MOTIF[bar] + 1) % PENTA.length] * 2;
+    lead(hz(t + beatSec * 0.5), gf, beatSec * 1.1, vary(0.09));
+  }
+}
+
+// ── content (full-bleed, swiping in; the crna pull on the way out) ──
+const SIDES = [
+  { clip: 'inset(100% 0% 0% 0%)', out: { y: '-30vh' } },
+  { clip: 'inset(0% 0% 100% 0%)', out: { y: '30vh' } },
+  { clip: 'inset(0% 100% 0% 0%)', out: { x: '30vw' } },
+  { clip: 'inset(0% 0% 0% 100%)', out: { x: '-30vw' } },
+];
+let sideIdx = 0;
+let pool = [], queue = [];
+const cache = new Map();
+const rngState = { s: 0x7e3 };
+function rng() { rngState.s = (rngState.s * 1103515245 + 12345) & 0x7fffffff; return rngState.s / 0x7fffffff; }
+function img(url) { if (!cache.has(url)) { const im = new Image(); im.src = url; cache.set(url, im); } return cache.get(url); }
+function nextStill() { if (!queue.length) { queue = [...pool]; for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } } return queue.pop(); }
+
+let curVid = null, current = null;
+function swap() {
+  const beatSec = 60 / bpm;
+  const dur = Math.min(0.7, beatSec * 0.78); // transition fits inside the beat
+  const makeVideo = rng() < 0.18;
+  const next = document.createElement('div');
+  next.className = 'layer';
+  if (makeVideo) { curVid = getClip(pickClipIdx(rng())); curVid.style.display = 'block'; playClip(curVid); next.appendChild(curVid); }
+  else next.appendChild(img(nextStill()).cloneNode());
+  stage.appendChild(next);
+  const side = SIDES[sideIdx++ % SIDES.length];
+  const out = current;
+  if (!out) { gsap.set(next, { clipPath: 'inset(0% 0% 0% 0%)', zIndex: 2 }); current = next; return; } // first piece: instant
+  gsap.set(next, { clipPath: side.clip, zIndex: 2 });
+  gsap.set(out, { zIndex: 1 });
+  const tl = gsap.timeline({ onComplete: () => { if (out) { const v = out.querySelector('video'); if (v) { v.pause(); v.style.display = 'none'; document.body.appendChild(v); } out.remove(); } } });
+  if (out) tl.to(out, { ...side.out, opacity: 0.4, scale: 0.8, duration: dur, ease: 'pageTransition' }, 0);
+  tl.to(next, { clipPath: 'inset(0% 0% 0% 0%)', duration: dur, ease: 'pageTransition' }, 0);
+  current = next;
+}
+
+let metroDeg = 0;
+function onBeat() {
+  beatN++;
+  swap();
+  kit(beatN);
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+  if (curVid && curVid.closest('.layer') && curVid.paused) curVid.play().catch(() => {});
+}
+
+function loop(t) {
+  if (!entered || !running) { lastT = t; requestAnimationFrame(loop); return; }
+  const dt = Math.min((t - lastT) / 1000, 0.25);
+  lastT = t;
+  phase += dt / (60 / bpm);
+  while (phase >= beatN + 1) onBeat();
+  statusEl.textContent = `${Math.round(bpm)} BPM · ${(60 / bpm).toFixed(2)}s / BEAT · ${running ? 'PLAY' : 'PAUSE'}`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ── the controller ──
+function paintFader() {
+  const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN);
+  knob.style.left = (p * 100) + '%';
+  fillLine.style.width = (p * 100) + '%';
+  readEl.textContent = Math.round(bpm);
+}
+function setBpm(v) { bpm = Math.max(BPM_MIN, Math.min(BPM_MAX, v)); paintFader(); }
+// build tick marks (every ~30 bpm)
+(() => { const t = document.querySelector('#fader .ticks'); for (let v = BPM_MIN; v <= BPM_MAX; v += 30) { const i = document.createElement('i'); i.style.left = ((v - BPM_MIN) / (BPM_MAX - BPM_MIN) * 100) + '%'; t.appendChild(i); } })();
+
+let dragging = false;
+function bpmFromX(clientX) { const r = fader.getBoundingClientRect(); const p = Math.max(0, Math.min(1, (clientX - r.left) / r.width)); setBpm(BPM_MIN + p * (BPM_MAX - BPM_MIN)); }
+fader.addEventListener('pointerdown', (e) => { dragging = true; fader.setPointerCapture(e.pointerId); bpmFromX(e.clientX); });
+fader.addEventListener('pointermove', (e) => { if (dragging) bpmFromX(e.clientX); });
+fader.addEventListener('pointerup', () => { dragging = false; });
+
+function setRunning(r) {
+  running = r;
+  playBtn.textContent = r ? '❚❚' : '▶';
+  if (ctx) { if (r) ctx.resume(); else ctx.suspend(); }
+}
+function setMuted(m) {
+  muted = m;
+  sndBtn.classList.toggle('off', m);
+  if (master) master.gain.value = m ? 0 : 0.9;
+}
+playBtn.addEventListener('click', () => setRunning(!running));
+sndBtn.addEventListener('click', () => setMuted(!muted));
+
+addEventListener('wheel', (e) => { if (entered) setBpm(bpm - e.deltaY * 0.06); }, { passive: true });
+addEventListener('keydown', (e) => {
+  if (!entered) return;
+  if (e.key === 'ArrowUp' || e.key === 'ArrowRight') setBpm(bpm + 2);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') setBpm(bpm - 2);
+  if (e.key === 'm') setMuted(!muted);
+  if (e.key === ' ') { e.preventDefault(); setRunning(!running); }
+});
+
+const manifestReady = loadImageryManifest();
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  ctx = new AudioContext();
+  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  // warm lo-fi tone: everything musical runs through a gentle lowpass that
+  // slowly breathes (LFO), so it never sits dead-still
+  warmth = ctx.createBiquadFilter(); warmth.type = 'lowpass'; warmth.frequency.value = 2400; warmth.Q.value = 0.6;
+  warmth.connect(master);
+  const fl = ctx.createOscillator(); fl.frequency.value = 0.05;
+  const flg = ctx.createGain(); flg.gain.value = 700;
+  fl.connect(flg); flg.connect(warmth.frequency); fl.start();
+  // space: a generated reverb on the musical bus — the biggest "natural" win
+  space = ctx.createConvolver(); space.buffer = makeIR(2.6);
+  const rev = ctx.createGain(); rev.gain.value = 0.32;
+  warmth.connect(space); space.connect(rev); rev.connect(master);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.06, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  await ctx.resume();
+  startBed();
+  pool = await manifestReady;
+  pool.forEach(img); warmClips(3);
+  metro.style.display = 'flex';
+  dock.classList.remove('hide');
+  paintFader();
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+  entered = true;
+  swap();           // first piece in immediately
+});
+</script>
+
+</body>
+</html>
