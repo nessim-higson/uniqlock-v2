@@ -18,8 +18,18 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r58-repack-fold` (commit `72bbdfa`, 2026-06-16) — r57 + the **fold** and a
-single-beat fix:
+**Current build:** `r59-fold-ribbon` (commit `875a528`, 2026-06-16) — same as r58 but the fold
+is now the **real dynamic fold-ribbon**, not the flat hinge. `doTransition`'s `'fold'` branch
+builds a GSAP-free **2-face 3D prism**: a `.fold-hinge` (`transform-style: preserve-3d`, pushed
+back `translateZ(-R)`) carries two `.fold-face` children — the current work on the front face
+(`translateZ(R)`), the incoming folded 90° at the seam. The hinge rotates 90° over the beat so
+the incoming work turns **toward you** as the outgoing folds away into black, seam cycling all
+four edges; perspective scales with tile size. Verified the prism renders true 3D under
+`overflow:hidden` (face foreshortens 400→218px). `_folding` guard stops a fold over a running
+one / a relocation mid-fold. Used by the repack lead (pulse) + subdivide's focal block. (r58's
+fold was the flat single-layer hinge — "not as dynamic.")
+
+r58 was r57 + the **fold** and a single-beat fix:
 - **Single beat = ONE full-screen image** — at 1 voice the lone tile was sized to a wide
   image's AR (a 95%×38% banner — the "weirdness"). Now `lit === 1` → a **full-bleed**
   full-screen tile (no gutter, AR-matched toward the viewport).
