@@ -173,8 +173,9 @@ function subThud(t, f0, f1, dur, gain) {
 
 // ── imagery pool ──
 let pool = [], queue = [];
+const arMap = {};   // url → native aspect ratio (w/h), captured on preload so REPACK can keep each image's own AR
 function nextImg() { if (!pool.length) return ''; if (!queue.length) { queue = [...pool]; for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } } return queue.pop(); }
-const manifestReady = loadImageryManifest().then((p) => { pool = p; pool.forEach((u) => { const im = new Image(); im.src = u; }); return p; }).catch(() => { pool = []; });
+const manifestReady = loadImageryManifest().then((p) => { pool = p; pool.forEach((u) => { const im = new Image(); im.onload = () => { if (im.naturalHeight) arMap[u] = im.naturalWidth / im.naturalHeight; }; im.src = u; }); return p; }).catch(() => { pool = []; });
 
 // ── the grid model ──
 const cells = { pulse: document.getElementById('c-pulse'), ga: document.getElementById('c-ga'), gb: document.getElementById('c-gb'), shim: document.getElementById('c-shim'), drive: document.getElementById('c-drive'), tick: document.getElementById('c-tick') };
@@ -332,8 +333,9 @@ function fire(vname, n, t, audioFn) {
   const area = binding[vname], spec = VSPEC[vname];
   beatFired.push({ area, strong: STRONG.has(vname) });
   setTimeout(() => {
+    if (mode === 'repack') return;                             // REPACK owns its imagery via composeFrame — no per-voice swaps
     const el = cells[area];
-    if (el.style.display === 'none' || el._rotating) return;   // skip a swap on a hidden or relocating tile
+    if (el.style.display === 'none') return;                   // skip a swap on a hidden tile
     if (el._veil && el._veil.style.opacity === '1') return;    // skip a swap on a blacked-out (negative-space) tile
     if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; }
     else if (spec.flash) popFlash(el, spec.flash, 260, '#fff');
@@ -366,92 +368,81 @@ function buildSubdivide() {
 let packSeed = 20260616 >>> 0;
 function rng() { packSeed = (packSeed * 1664525 + 1013904223) >>> 0; return packSeed / 4294967296; }
 
-// ── REPACK, reworked again (2026-06-16): a STILL collage, not a moving grid ──
-// the boxes do NOT slide. a stable scaffold of fixed-aspect-ratio tiles is
-// packed onto a fine module grid with GAPS — it does NOT cover the viewport
-// 100%; the empty cells read as black negative space. tempo sets how many tiles
-// are LIT (1 image at 60 BPM, more form in as you slide up). periodically the
-// system relocates an image to a different free tile — fading it out here and
-// in over there, never translating — so images "appear in different places it
-// sees fit" while black opens and closes. per-voice swaps still change the
-// image inside a lit tile in place.
-let GC = 14, GR = 9;
-const TILE = [[3, 3], [4, 3], [3, 4], [4, 4], [5, 4], [4, 5], [5, 5], [6, 4], [4, 6]];
-const GUT = 0.7;                                       // % viewport gutter inset per side → the black gaps
-const REPACK_PERIOD = 4;                               // a relocation every 4 beats (one bar)
-let scaffold = [], slotByVoice = {}, lastTierCount = -1, repackBar = -1;
-// pack up to maxTiles fixed-AR tiles onto a fine module grid, NO overlap; a
-// coverage cap leaves whole cells empty (big black negative space), and the
-// render-time gutter (GUT) opens a consistent gap around every tile.
-function buildScaffold(maxTiles, coverCap) {
-  const portrait = innerHeight > innerWidth;
-  GC = portrait ? 9 : 14; GR = portrait ? 14 : 9;
-  const occ = Array.from({ length: GR }, () => new Array(GC).fill(false));
-  const total = GC * GR; let covered = 0; const rects = []; let tries = 0;
-  while (rects.length < maxTiles && tries < 400) {
-    tries++;
-    const tl = TILE[Math.floor(rng() * TILE.length)];
-    let tw = tl[0], th = tl[1];
-    if (portrait) { const t = tw; tw = th; th = t; }   // taller tiles in portrait
-    if (tw > GC || th > GR) continue;
-    if (rects.length >= 1 && (covered + tw * th) / total > coverCap) continue;
-    const cx = Math.floor(rng() * (GC - tw + 1)), cy = Math.floor(rng() * (GR - th + 1));
-    let free = true;
-    for (let y = cy; y < cy + th && free; y++) for (let x = cx; x < cx + tw; x++) { if (occ[y][x]) { free = false; break; } }
-    if (!free) continue;
-    for (let y = cy; y < cy + th; y++) for (let x = cx; x < cx + tw; x++) occ[y][x] = true;
-    covered += tw * th;
-    rects.push({ x: cx / GC, y: cy / GR, w: tw / GC, h: th / GR });
-  }
-  rects.sort((a, b) => b.w * b.h - a.w * a.h);          // biggest first → hierarchy
+// ── REPACK, reworked again (2026-06-16): native-AR collage, no cropping ──
+// per the NEVVERLAND refs: each image keeps its OWN aspect ratio and is wedged
+// into the canvas at full height (or split into two shelves), with BLACK filling
+// the leftover — never cropped into a fixed tile. tempo sets how many images are
+// in the frame. the whole frame is recomposed on a cadence by a fade (a soft
+// cut), not by sliding — so images "appear in different places" without moving.
+const REPACK_PERIOD = 4;                               // recompose the frame every 4 beats (one bar)
+let lastTierCount = -1, repackBar = -1, frameTok = 0;
+function hideRepack(el, instant) {
+  el._veil.style.opacity = '0'; el._packHidden = true; el.style.transitionDelay = '0ms';
+  if (instant) { el.style.display = 'none'; el.style.opacity = '0'; return; }
+  el.style.transition = 'opacity .22s ease'; el.style.opacity = '0';
+  setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 240);
+}
+// pack native-AR images into a horizontal shelf [y0..y0+h]: full shelf height,
+// widths from each AR, leftover width → black (left/centre/right of the row).
+function packBandH(ars, y0, h, vw, vh, gut) {
+  const N = ars.length;
+  let H = h, widths = ars.map((a) => a * H);
+  let used = widths.reduce((a, b) => a + b, 0) + gut * (N - 1);
+  if (used > vw) { const k = (vw - gut * (N - 1)) / (used - gut * (N - 1)); H *= k; widths = widths.map((w) => w * k); used = vw; }
+  const leftover = Math.max(0, vw - used);
+  const m = rng(); const startX = m < 0.34 ? gut : m < 0.67 ? leftover * 0.5 : Math.max(gut, leftover - gut);
+  const yTop = y0 + (h - H) * 0.5;                      // centre the shelf → black above/below
+  const rects = []; let cx = startX;
+  for (let i = 0; i < N; i++) { rects.push({ x: cx / vw, y: yTop / vh, w: widths[i] / vw, h: H / vh }); cx += widths[i] + gut; }
   return rects;
 }
-function setRect(el, r) {
-  el.style.transition = 'none';                        // positions NEVER animate — images don't move
-  el.style.left = (r.x * 100 + GUT) + '%'; el.style.top = (r.y * 100 + GUT) + '%';
-  el.style.width = (r.w * 100 - 2 * GUT) + '%'; el.style.height = (r.h * 100 - 2 * GUT) + '%';
-  void el.offsetWidth;
+// the transpose, for portrait: stack native-AR images down a column [x0..x0+w].
+function packBandV(ars, x0, w, vw, vh, gut) {
+  const N = ars.length;
+  let W = w, heights = ars.map((a) => W / a);
+  let used = heights.reduce((a, b) => a + b, 0) + gut * (N - 1);
+  if (used > vh) { const k = (vh - gut * (N - 1)) / (used - gut * (N - 1)); W *= k; heights = heights.map((hh) => hh * k); used = vh; }
+  const leftover = Math.max(0, vh - used);
+  const m = rng(); const startY = m < 0.34 ? gut : m < 0.67 ? leftover * 0.5 : Math.max(gut, leftover - gut);
+  const xLeft = x0 + (w - W) * 0.5;                     // centre the column → black left/right
+  const rects = []; let cy = startY;
+  for (let i = 0; i < N; i++) { rects.push({ x: xLeft / vw, y: cy / vh, w: W / vw, h: heights[i] / vh }); cy += heights[i] + gut; }
+  return rects;
 }
-function showCell(el, r, instant) {
-  el.style.display = ''; setRect(el, r); el._veil.style.opacity = '0';
-  const lay = el._layers[el._front];
-  if (!lay.src) lay.src = nextImg();                   // fill if this tile was never used
-  lay.style.opacity = '1';
-  if (instant) { el.style.transition = 'none'; el.style.opacity = '1'; }
-  else { el.style.opacity = '0'; void el.offsetWidth; el.style.transition = 'opacity .5s ease'; el.style.opacity = '1'; }
-  el._packHidden = false;
-}
-function hideRepack(el, instant) {
-  el._veil.style.opacity = '0'; el._packHidden = true;
-  if (instant) { el.style.display = 'none'; el.style.opacity = '0'; return; }
-  el.style.transition = 'opacity .45s ease'; el.style.opacity = '0';
-  setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 460);
-}
-function buildAndPlace(instant) {
-  const voices = activeVoiceList();
-  VOICES.forEach((v, i) => { binding[v] = AREAS[i]; }); // identity binding so per-voice swaps hit the right tile
-  scaffold = buildScaffold(voices.length + 3, 0.84);    // a few spare positions for relocation; never a full fill
-  const n = Math.min(voices.length, scaffold.length);   // light `tempo` tiles; the rest stay black (negative space)
-  slotByVoice = {}; const activeCells = new Set();
-  for (let i = 0; i < n; i++) { const v = voices[i]; slotByVoice[v] = i; activeCells.add(binding[v]); showCell(cells[binding[v]], scaffold[i], instant); }
-  CELL_IDS.forEach((id) => { if (!activeCells.has(id)) hideRepack(cells[id], instant); });
-}
-// relocate one lit image to a free tile — fade out here, reappear over there
-function rotateRepack() {
-  const occupied = new Set(Object.values(slotByVoice));
-  const free = []; for (let i = 0; i < scaffold.length; i++) if (!occupied.has(i)) free.push(i);
-  if (!free.length) return;
-  const vs = Object.keys(slotByVoice); if (!vs.length) return;
-  const v = vs[Math.floor(rng() * vs.length)], el = cells[binding[v]];
-  const newSlot = free[Math.floor(rng() * free.length)];
-  slotByVoice[v] = newSlot; el._rotating = true;
-  el.style.transition = 'opacity .42s ease'; el.style.opacity = '0';
-  setTimeout(() => {
-    if (mode !== 'repack') { el._rotating = false; return; }
-    setRect(el, scaffold[newSlot]);
-    const u = nextImg(); if (u) el._layers[el._front].src = u;   // a fresh image in the new place
-    el.style.transition = 'opacity .5s ease'; el.style.opacity = '1'; el._rotating = false;
-  }, 440);
+function composeFrame(instant) {
+  const tok = ++frameTok;
+  const voices = activeVoiceList(), N = voices.length;
+  VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });
+  const picks = []; for (let i = 0; i < N; i++) { const u = nextImg(); picks.push({ u, ar: arMap[u] || 0.72 }); }
+  const vw = innerWidth, vh = innerHeight, gut = Math.max(6, vw * 0.007), ars = picks.map((p) => p.ar);
+  const portrait = vh > vw;
+  let rects;
+  if (portrait) {                                       // stack down columns
+    if (N <= 3) rects = packBandV(ars, 0, vw, vw, vh, gut);
+    else { const k = Math.ceil(N / 2), split = (0.42 + rng() * 0.16) * vw; rects = packBandV(ars.slice(0, k), 0, split, vw, vh, gut).concat(packBandV(ars.slice(k), split, vw - split, vw, vh, gut)); }
+  } else {                                              // lay across rows
+    if (N <= 3) rects = packBandH(ars, 0, vh, vw, vh, gut);
+    else { const k = Math.ceil(N / 2), split = (0.42 + rng() * 0.16) * vh; rects = packBandH(ars.slice(0, k), 0, split, vw, vh, gut).concat(packBandH(ars.slice(k), split, vh - split, vw, vh, gut)); }
+  }
+  const apply = () => {
+    if (tok !== frameTok) return;
+    const live = new Set();
+    for (let i = 0; i < N; i++) {
+      const el = cells[binding[voices[i]]], r = rects[i]; live.add(binding[voices[i]]);
+      el.style.display = ''; el.style.transition = 'none'; el.style.transitionDelay = '0ms'; el._veil.style.opacity = '0';
+      el.style.left = (r.x * 100) + '%'; el.style.top = (r.y * 100) + '%'; el.style.width = (r.w * 100) + '%'; el.style.height = (r.h * 100) + '%';
+      const lay = el._layers[el._front]; lay.src = picks[i].u; lay.style.opacity = '1'; lay.style.transform = 'none'; lay.style.clipPath = 'inset(0 0 0 0)';
+      void el.offsetWidth;
+      el._packHidden = false;
+      if (instant) { el.style.opacity = '1'; }
+      else { el.style.opacity = '0'; void el.offsetWidth; el.style.transition = 'opacity .34s ease'; el.style.transitionDelay = (i * 45) + 'ms'; el.style.opacity = '1'; }
+    }
+    CELL_IDS.forEach((id) => { if (!live.has(id)) hideRepack(cells[id], instant); });
+  };
+  if (instant) { apply(); return; }
+  let any = false;                                       // fade the current frame out first → a soft cut
+  CELL_IDS.forEach((id) => { const el = cells[id]; if (el.style.display !== 'none' && !el._packHidden) { any = true; el.style.transition = 'opacity .18s ease'; el.style.transitionDelay = '0ms'; el.style.opacity = '0'; } });
+  setTimeout(apply, any ? 190 : 0);
 }
 
 // SUBDIVIDE in/out: keep the favored tiled layout, but let cells fade to BLACK
@@ -493,8 +484,9 @@ function onBeat() {
   if (ctx) beat(beatN, ctx.currentTime);
   if (mode === 'repack') {
     const live = activeVoiceList().length;
-    if (live !== lastTierCount) { lastTierCount = live; repackBar = Math.floor((beatN - 1) / REPACK_PERIOD); buildAndPlace(false); }  // tempo changed → rebuild the scaffold
-    else { const bar = Math.floor((beatN - 1) / REPACK_PERIOD); if (bar !== repackBar) { repackBar = bar; rotateRepack(); } }     // else relocate one image
+    const bar = Math.floor((beatN - 1) / REPACK_PERIOD);
+    if (live !== lastTierCount || bar !== repackBar) { lastTierCount = live; repackBar = bar; composeFrame(false); }  // recompose the whole native-AR frame
+
   } else {
     applyModeLayout();
     if (mode === 'subdivide') subdivideInOut();
@@ -516,10 +508,10 @@ function setMode(m) {
   subVeiled.clear();
   if (m !== 'repack') {                                  // tear down absolute positioning, restore the grid
     grid.classList.remove('pack');
-    CELL_IDS.forEach((id) => { const el = cells[id]; el.style.left = el.style.top = el.style.width = el.style.height = ''; el.style.transition = ''; el.style.opacity = ''; el.style.display = ''; el._packHidden = false; el._rotating = false; });
+    CELL_IDS.forEach((id) => { const el = cells[id]; el.style.left = el.style.top = el.style.width = el.style.height = ''; el.style.transition = ''; el.style.opacity = ''; el.style.display = ''; el._packHidden = false; });
   }
   document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.classList.toggle('on', c.dataset.mode === m));
-  if (m === 'repack') { grid.classList.add('pack'); lastTierCount = -1; repackBar = -1; buildAndPlace(true); }
+  if (m === 'repack') { grid.classList.add('pack'); lastTierCount = -1; repackBar = -1; composeFrame(true); }
   else applyModeLayout();
 }
 document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventListener('click', () => setMode(c.dataset.mode)));
@@ -570,7 +562,7 @@ overlay.addEventListener('click', async () => {
   await manifestReady;
   initImages();
   paintFader();
-  if (mode === 'repack') { grid.classList.add('pack'); lastTierCount = -1; repackBar = -1; buildAndPlace(true); }
+  if (mode === 'repack') { grid.classList.add('pack'); lastTierCount = -1; repackBar = -1; composeFrame(true); }
   else applyModeLayout();
   revealGrid();
   overlay.classList.add('leaving');
