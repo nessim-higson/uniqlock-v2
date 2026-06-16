@@ -18,8 +18,18 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r57-repack-r52-ar` (commit `bf2de12`, 2026-06-16) — REPACK worked back
-to **r52's collage bones** (the user's favourite) + two changes. Bones kept: a fixed
+**Current build:** `r58-repack-fold` (commit `72bbdfa`, 2026-06-16) — r57 + the **fold** and a
+single-beat fix:
+- **Single beat = ONE full-screen image** — at 1 voice the lone tile was sized to a wide
+  image's AR (a 95%×38% banner — the "weirdness"). Now `lit === 1` → a **full-bleed**
+  full-screen tile (no gutter, AR-matched toward the viewport).
+- **Fold on the lead** — `VSPEC.pulse.kind` is now `'fold'` (the silent-house 3D hinge),
+  shared by **subdivide AND repack**. In repack the lead (pulse = the largest tile, verified)
+  **folds every 2 beats**; other tiles still crossfade in place. At a single beat the
+  full-screen image folds on the beat. `doTransition(el, spec, url)` gained an optional url so
+  repack hands it an AR-matched image (`nextImgForAR`) — fold stays low-crop.
+
+r57 was **r52's collage bones** (the user's favourite) + two changes: Bones kept: a fixed
 **module-grid scaffold** of tiles (`buildScaffold` on a 20×13 / portrait 13×20 grid), big
 **black negative space**, images that **APPEAR in different places by fading** (`rotateRepack`
 relocates one image per bar — fade out here, fade in over there, never slides), tempo = how
