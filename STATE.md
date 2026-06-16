@@ -31,7 +31,17 @@ subdivide @ 60 BPM — at the minimal beat (1 voice) repack shows **one full-scr
 the crna** on it (`placeMinBeat` + `fire` no longer early-returns for repack at 1 voice), instead of
 the morph engine's crossfade. The MAIN `comps/orchestra` is separate (r63 crna).
 
-**Current main build:** `r63-minbeat-crna` (commit `43cb046`, 2026-06-16) — the lead (pulse) does the
+**Current main build:** `r66-rigid-reframe-switch` (commit `a29b314`, 2026-06-17) — the main
+`comps/orchestra` now **combines both repack engines** behind a **RIGID/REFRAME switch** (the
+`#styleChip`, key `r`): **RIGID** = the fixed-tile collage (r52 bones, AR-matched tiles, relocate-
+by-fade, big black negative space); **REFRAME** = the morph columns (dynamic re-roll every bar, the
+whole layout morphs/slides to fill the viewport, staggered masonry — lifted from orchestra-morph,
+renamed `rf*`). `stepRepack()` dispatches to `rigidStep`/`rfStep`; `fire()` lets the lead crna in
+RIGID, returns in REFRAME (morph owns imagery) except the minimal beat; both styles collapse to ONE
+full-screen crna image at 60 BPM (`placeMinBeat`). `comps/orchestra-morph` stays as the standalone
+REFRAME reference. Mobile type bumped (r65). Below = the prior single-engine lead-transition history.
+
+**r63-minbeat-crna** (commit `43cb046`) — the lead (pulse) does the
 **CRNA four-side pull-back at every tempo, including the minimal beat**. Removed r62's `MIN_WIPE`
 override, so **REPACK at 60 BPM (one full-screen image) matches the r61 morph build's SUBDIVIDE at
 60 BPM** — the reference the user pointed to (single full-screen crna). Applies to subdivide + repack.
