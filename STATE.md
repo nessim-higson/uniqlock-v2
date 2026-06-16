@@ -18,17 +18,22 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r53-repack-native-ar` (commit `f9311cc`, 2026-06-16) — REPACK is now a
-**native-AR collage**: each image keeps its OWN aspect ratio (captured on preload into
-`arMap`), the cell box is sized to that AR so `object-fit:cover` shows the full image with
-**zero crop**, and images are wedged into the canvas by a shelf packer (full-height columns
-landscape / stacked rows portrait; 1 band for ≤3 images, 2 bands otherwise) with leftover
-space left **black** (negative space, never 100%). The whole frame recomposes on a cadence
-(every bar / on tempo tier change) by a **fade, not a slide**, so images "appear in different
-places" without moving. Per-voice in-place swaps are disabled in repack (they'd crop / fight
-the frame). Reference: the user's NEVVERLAND.mov stills (native-AR images + black). Tempo
-still = image count (1 at 60 BPM → 6 at max). SUBDIVIDE unchanged; BREATHE tabled. Prior
-collage notes (r52, fixed-AR tiles + relocation) superseded — they cropped.
+**Current build:** `r54-repack-columns` (commit `1e66ddd`, 2026-06-16) — REPACK is a
+**native-AR COLUMN collage** where images **butt against one another** and the grid
+**continuously morphs**. Canvas = vertical columns of varying width; slot 0 is a single
+full-height **"parent"** column, the rest group into columns of one or two stacked images
+(`buildColStruct`). A 1-image column is full height (width = H·AR); a 2-image column shares a
+width chosen so the two native-AR images stack to exactly fill the height. Columns scale
+together if they overrun the width; leftover is centred → **black at the sides** (and
+top/bottom if scaled). **Zero crop** (box AR === image AR, verified). MORPH + parents: the
+column structure is stable until tempo changes; each slot swaps its image on a cadence
+(parent/slot-0 longest, `periodFor`), and every swap relayouts so widths/heights **animate**
+to the new fit. AR is read fresh from `arMap` each layout (learned on load via
+`setLayerImg`→`scheduleRelayout`) so swapped images never crop. Reference: NEVVERLAND.mov
+stills. Tempo = image count (1 parent at 60 BPM → 6 at max). SUBDIVIDE unchanged; BREATHE
+tabled. **History of the repack rework:** r51 moving slice-grid → r52 fixed-AR tiles
+(cropped) → r53 native-AR shelves (uniform/"stock") → **r54 native-AR columns + parents +
+morph** (current). Each prior is superseded.
 
 **Older:** `r52-repack-collage` (commit `dbaacee`, 2026-06-16) — the orchestra
 on Strata imagery, with the **R25 crna four-side pull-back** as PULSE's transition
