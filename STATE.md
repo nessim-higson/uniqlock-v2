@@ -173,11 +173,13 @@ cells.
    blocks; build the suite (ARC/Magma/Fault orchestras).
 3. **Which comp becomes the main piece**, and which timebase it uses (sacred
    conductor vs. free-tempo).
-4. **Transition** — DECIDED (2026-06-16): the **fold** (R28 / `landmark-03-fold-ribbon`)
-   is the chosen transition — user called it the smoothest. The orchestra build now
-   uses a per-block, all-sides version of it (`kind: 'fold'` on PULSE: the old image
-   hinges back on a cycling edge revealing the new one held behind). The crna pull is
-   retired as the default (kept in code as an alternate `kind: 'pull'`).
+4. **Transition** — DECIDED (2026-06-16): the **R25 crna four-side pull-back**
+   (`landmark-01-the-door` / R25 `comps/solo/`) is THE transition. Ported verbatim
+   into orchestra PULSE as `kind: 'crna'` — uses GSAP + the `pageTransition` CustomEase:
+   incoming clip-reveals from an edge on top while the outgoing pulls back 30% + scale
+   .8 + opacity .4, 0.7s, cycling all four sides. (Earlier fold/pull attempts kept in
+   code as alternates `kind: 'fold'`/`'pull'` but NOT used.) `landmark-03-fold-ribbon`
+   is kept as a reference but is not the chosen transition.
 5. **Drawer / nav** — wire real destinations into the mark-as-door drawer
    (`landmark-01`).
 6. Carry-overs from SPEC: shareable `?seed=` permutation URL; what the "hourly
