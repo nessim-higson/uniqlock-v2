@@ -18,7 +18,17 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r60-lead-crna` (commit `fd1013f`, 2026-06-16) — the lead transition is back
+**Separate build — `comps/orchestra-morph/`** (the kept-aside r55 morph, the user's pick for
+"shifting + morphing all of it together"): the whole column structure re-rolls every bar and the
+entire layout **animates** (slides + resizes) to the new composition, gaps + imagery in/out,
+FIT/FILL. **r61-morph-fill** (commit `468f561`) reworked its FIT packer to **fill the viewport**
+(it used to live centred / as a thin strip): a **staggered masonry** — columns share the full
+width, each stacks its native-AR images, the whole thing scales so the **tallest column fills the
+height**, short columns leave ragged black at their bottoms (distributed, not a centred island).
+Verified landscape fills vertical 2→99% + most of the width. Listed on the comps slate as
+"Orchestra — Morph". The MAIN `comps/orchestra` is separate and unchanged (r60 crna).
+
+**Current main build:** `r60-lead-crna` (commit `fd1013f`, 2026-06-16) — the lead transition is back
 to the **CRNA four-side pull-back** (`VSPEC.pulse.kind` fold→crna). The user pointed at **r51's
 subdivide at low BPM** as the effect they want — that is the crna (incoming clip-reveals from an
 edge while the outgoing pulls back 30% + scale .8 + fade, cycling all four sides), **not** the
