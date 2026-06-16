@@ -344,7 +344,6 @@ const VSPEC = {
   drive:   { kind: 'wipe',     dur: 240,  swap: 2, flash: 0.14 },
   tick:    { kind: 'cut',      dur: 90,   swap: 2, flash: 0.20 },
 };
-const MIN_WIPE = { kind: 'wipe', dur: 620, swap: 1, flash: 0 };   // minimal beat (one full-screen image) → the drive wipe
 const STRONG = new Set(['pulse', 'groanA', 'groanB']);
 const binding = {};
 VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });   // valid before the first beat
@@ -353,8 +352,7 @@ let mode = 'repack';
 
 function fire(vname, n, t, audioFn) {
   audioFn();
-  const area = binding[vname]; let spec = VSPEC[vname];
-  if (vname === 'pulse' && activeVoiceList().length === 1) spec = MIN_WIPE;   // minimal beat: the lone full-screen image wipes; crna stays for higher tempos
+  const area = binding[vname], spec = VSPEC[vname];   // lead = crna at every tempo, incl. the minimal beat (matches the morph build's subdivide @ 60 BPM)
   beatFired.push({ area, strong: STRONG.has(vname) });
   setTimeout(() => {
     const el = cells[area];
