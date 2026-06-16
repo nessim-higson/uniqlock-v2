@@ -18,7 +18,19 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r52-repack-collage` (commit `dbaacee`, 2026-06-16) — the orchestra
+**Current build:** `r53-repack-native-ar` (commit `f9311cc`, 2026-06-16) — REPACK is now a
+**native-AR collage**: each image keeps its OWN aspect ratio (captured on preload into
+`arMap`), the cell box is sized to that AR so `object-fit:cover` shows the full image with
+**zero crop**, and images are wedged into the canvas by a shelf packer (full-height columns
+landscape / stacked rows portrait; 1 band for ≤3 images, 2 bands otherwise) with leftover
+space left **black** (negative space, never 100%). The whole frame recomposes on a cadence
+(every bar / on tempo tier change) by a **fade, not a slide**, so images "appear in different
+places" without moving. Per-voice in-place swaps are disabled in repack (they'd crop / fight
+the frame). Reference: the user's NEVVERLAND.mov stills (native-AR images + black). Tempo
+still = image count (1 at 60 BPM → 6 at max). SUBDIVIDE unchanged; BREATHE tabled. Prior
+collage notes (r52, fixed-AR tiles + relocation) superseded — they cropped.
+
+**Older:** `r52-repack-collage` (commit `dbaacee`, 2026-06-16) — the orchestra
 on Strata imagery, with the **R25 crna four-side pull-back** as PULSE's transition
 (pure CSS, GSAP removed — see Open decisions #4), the IAAH metronome box keeping
 time, **two modes** (subdivide / repack), tempo fader, accent + warm-black design pass.
