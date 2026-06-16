@@ -334,7 +334,7 @@ function fire(vname, n, t, audioFn) {
   const area = binding[vname], spec = VSPEC[vname];
   beatFired.push({ area, strong: STRONG.has(vname) });
   setTimeout(() => {
-    if (mode === 'repack') return;                             // REPACK owns its imagery via the spiral driver — no per-voice swaps
+    if (mode === 'repack' && activeVoiceList().length > 1) return;   // repack drives its own imagery EXCEPT at the minimal beat (1 voice → crna, like subdivide)
     const el = cells[area];
     if (el.style.display === 'none') return;                   // skip a swap on a hidden tile
     if (el._veil && el._veil.style.opacity === '1') return;    // skip a swap on a blacked-out (negative-space) tile
@@ -460,8 +460,19 @@ function layoutRepack(changed, instant) {
   }
   CELL_IDS.forEach((id) => { if (!live.has(id)) hideRepack(cells[id], instant); });
 }
+// minimal beat: one FULL-SCREEN image on c-pulse; fire() does the crna on it, so
+// repack @ 60 BPM looks the same as subdivide @ 60 BPM.
+function placeMinBeat(instant) {
+  binding['pulse'] = 'pulse';
+  const el = cells['pulse'];
+  el.style.display = ''; el.style.transition = 'none'; el._packHidden = false; el._veil.style.opacity = '0';
+  el.style.left = '0%'; el.style.top = '0%'; el.style.width = '100%'; el.style.height = '100%'; el.style.opacity = '1';
+  const lay = el._layers[el._front]; if (!lay.src) { setLayerImg(lay, nextImg()); lay.style.opacity = '1'; }
+  CELL_IDS.forEach((id) => { if (id !== 'pulse') { const c = cells[id]; c.style.display = 'none'; c.style.opacity = '0'; c._packHidden = true; } });
+}
 function stepRepack(instant) {
   const N = Math.min(activeVoiceList().length, CELL_IDS.length);
+  if (N === 1) { if (repackN !== 1 || instant) { repackN = 1; placeMinBeat(instant); } return; }   // minimal beat → full-screen crna (handled by fire)
   if (instant) {                                         // fresh build (mode enter)
     repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = rollStruct(N); lastRoll = beatN;
     for (let i = 0; i < N; i++) { repackImgs[i] = pickImg(); slotNext[i] = beatN + 1 + (i % 3); }
@@ -569,7 +580,7 @@ fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); })
 fader.addEventListener('pointerup', () => { drag = false; });
 fader.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') { bpm = Math.max(BPM_MIN, bpm - 2); paintFader(); } else if (e.key === 'ArrowRight') { bpm = Math.min(BPM_MAX, bpm + 2); paintFader(); } });
 playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
-window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (repackN) layoutRepack(new Set(), true); } else applyModeLayout(); });
+window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (activeVoiceList().length === 1) { repackN = 1; placeMinBeat(true); } else if (repackN) layoutRepack(new Set(), true); } else applyModeLayout(); });
 
 // choreographed entry — blocks assemble in, staggered
 function revealGrid() {
