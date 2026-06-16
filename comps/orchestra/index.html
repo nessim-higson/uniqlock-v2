@@ -377,16 +377,16 @@ function rng() { packSeed = (packSeed * 1664525 + 1013904223) >>> 0; return pack
 // is black. a few "parent" slots (slot 0 first) persist longer while inner
 // slots swap faster; every swap relayouts and the boxes ANIMATE to the new fit,
 // so the grid flows. PULSE/voices no longer bind tiles here — cells are indexed.
-let repackImgs = [], slotNext = [], repackN = 0, colStruct = [], relayoutTO = 0, lastRoll = -99, fitMode = true;
-const LAYOUT_PERIOD = 4;                                // re-roll the whole layout every bar → seamless structural morph
-function periodFor(i) { return Math.max(2, 5 - i); }   // beats a slot holds before swapping; parent (slot 0) lives longest
+let repackImgs = [], slotNext = [], repackN = 0, colStruct = [], relayoutTO = 0, lastRoll = -99, fitMode = true, curRects = [];
+const STRUCT_PERIOD = 16;                               // a fresh unique layout fades in every 4 bars (it "appears", never slides)
+function periodFor(i) { return Math.max(3, 8 - i); }   // beats a slot holds before its in-place swap; parent (slot 0) lives longest
 function pickImg() { return { url: nextImg() }; }
 function arOf(i) { return arMap[repackImgs[i].url] || 0.72; }   // read AR fresh each layout (it may load after the pick)
 function setLayerImg(lay, url) {                        // set a layer's image, learning its AR on load → relayout once known
   lay.onload = () => { if (lay.naturalHeight && arMap[url] === undefined) { arMap[url] = lay.naturalWidth / lay.naturalHeight; scheduleRelayout(); } };
   lay.src = url;
 }
-function scheduleRelayout() { clearTimeout(relayoutTO); relayoutTO = setTimeout(() => { if (mode === 'repack' && repackN) layoutRepack(new Set(), false); }, 70); }
+function scheduleRelayout() { clearTimeout(relayoutTO); relayoutTO = setTimeout(() => { if (mode === 'repack' && repackN) { curRects = packMasonry(innerWidth, innerHeight); applyRects('morph'); } }, 70); }   // an image's true AR loaded → re-fit
 function hideRepack(el, instant) {
   el._veil.style.opacity = '0'; el._packHidden = true;
   if (instant) { el.style.display = 'none'; el.style.opacity = '0'; return; }
@@ -394,91 +394,94 @@ function hideRepack(el, instant) {
   setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 420);
 }
 // GENUINELY DYNAMIC structure: slot 0 is always a single "parent" column (its
-// image persists; it just moves), the rest group randomly into 1/2/3 stacks and
-// the column ORDER is shuffled — re-rolled every bar so the layout keeps
-// changing. the whole structure then morphs to the new roll (seamless movement).
+// image persists; it just appears elsewhere on a re-roll), the rest group into
+// 1/2/3-image columns. each column gets a varied WIDTH and a vertical OFFSET so
+// the masonry staggers and fills the viewport (not one flat row). re-rolled only
+// on the slow structural cadence (and faded in), so nothing slides around.
 function rollStruct(N) {
-  if (N <= 1) return [[0]];
-  const cols = [[0]]; let i = 1;
-  while (i < N) { const rem = N - i; const take = (rem >= 3 && rng() < 0.22) ? 3 : (rem >= 2 && rng() < 0.5) ? 2 : 1; const g = []; for (let k = 0; k < take; k++) g.push(i + k); cols.push(g); i += take; }
-  for (let k = cols.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [cols[k], cols[j]] = [cols[j], cols[k]]; }   // parent can sit anywhere
-  return cols;
+  if (N <= 1) return [{ slots: [0], w: 1, off: 0 }];
+  const groups = [[0]]; let i = 1;
+  while (i < N) { const rem = N - i; const take = (rem >= 3 && rng() < 0.2) ? 3 : (rem >= 2 && rng() < 0.5) ? 2 : 1; const g = []; for (let k = 0; k < take; k++) g.push(i + k); groups.push(g); i += take; }
+  for (let k = groups.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [groups[k], groups[j]] = [groups[j], groups[k]]; }
+  return groups.map((g) => ({ slots: g, w: 0.7 + rng() * 0.9, off: g.length === 1 && rng() < 0.6 ? rng() * 0.32 : rng() * 0.12 }));
 }
-// columns of varying width. FIT = each image at its native AR (no crop); 1-image
-// column is full height (width = H·AR), a stack shares a width so its native-AR
-// images fill the height — leftover is black. FILL = the same column proportions
-// stretched to fill the width (images crop). a gutter (added in layoutRepack)
-// opens gaps between every work either way.
-function packColumns(vw, vh) {
-  const colW = colStruct.map((g) => g.length === 1 ? vh * arOf(g[0]) : vh / g.reduce((s, si) => s + 1 / arOf(si), 0));
-  const totalW = colW.reduce((a, b) => a + b, 0);
-  let widths, H, startX, yTop;
-  if (fitMode) {
-    const scale = totalW > vw ? vw / totalW : 1;
-    widths = colW.map((w) => w * scale); H = vh * scale;
-    const used = widths.reduce((a, b) => a + b, 0);
-    startX = (vw - used) * 0.5; yTop = (vh - H) * 0.5;            // centred → black at the sides (and top/bottom if scaled)
-  } else {
-    widths = colW.map((w) => w / totalW * vw); H = vh;            // stretch to fill the width → crop
-    startX = 0; yTop = 0;
-  }
-  const rects = new Array(repackN); let cx = startX;
-  colStruct.forEach((g, ci) => {
-    const W = widths[ci]; let cy = yTop;
-    if (fitMode) g.forEach((si) => { const h = W / arOf(si); rects[si] = { x: cx, y: cy, w: W, h }; cy += h; });
-    else { const inv = g.reduce((s, si) => s + 1 / arOf(si), 0); g.forEach((si) => { const h = H * (1 / arOf(si)) / inv; rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); }
-    cx += W;
-  });
+// STAGGERED MASONRY: columns of native-AR images (height = colWidth / AR), each
+// column its own width + vertical offset, then the whole arrangement is scaled
+// to CONTAIN the viewport (FIT) — so it fills the dominant dimension and staggers,
+// with black in the negative space. FILL stretches it edge-to-edge (images crop).
+function packMasonry(vw, vh) {
+  const cols = colStruct, gN = 0.045;                    // natural gutter (column width ≈ 1 unit)
+  const colX = [], colH = []; let xN = 0;
+  cols.forEach((c) => { colX.push(xN); xN += c.w + gN; let h = 0; c.slots.forEach((si, k) => { h += c.w / arOf(si); if (k < c.slots.length - 1) h += gN; }); colH.push(h); });
+  const Wn = Math.max(0.001, xN - gN);
+  let Hn = 0.001; cols.forEach((c, ci) => { Hn = Math.max(Hn, (c.off || 0) + colH[ci]); });
+  let sx, sy, ox, oy;
+  if (fitMode) { const s = Math.min(vw / Wn, vh / Hn) * 0.97; sx = sy = s; ox = (vw - Wn * s) / 2; oy = (vh - Hn * s) / 2; }
+  else { sx = vw / Wn; sy = vh / Hn; ox = 0; oy = 0; }
+  const rects = new Array(repackN);
+  cols.forEach((c, ci) => { let yN = (c.off || 0); c.slots.forEach((si) => { const hN = c.w / arOf(si); rects[si] = { x: ox + colX[ci] * sx, y: oy + yN * sy, w: c.w * sx, h: hN * sy }; yN += hN + gN; }); });
   return rects;
 }
-function swapImage(el, url) {                            // crossfade the image inside a cell (content morph)
+// re-stack ONE column inside curRects (keep its x/width/top) — for an in-place
+// image swap whose new AR changed a height. only that column reflows; nothing
+// else on the canvas moves.
+function reflowColumn(ci) {
+  const c = colStruct[ci], first = c.slots[0]; if (!curRects[first]) return;
+  const x = curRects[first].x, w = curRects[first].w, gpx = w * 0.045; let y = curRects[first].y;
+  c.slots.forEach((si) => { const h = w / arOf(si); curRects[si] = { x, y, w, h }; y += h + gpx; });
+}
+function swapImage(el, url) {                            // crossfade the image inside a cell (no motion)
   const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
   back.style.transition = 'none'; back.style.transform = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.opacity = '0'; setLayerImg(back, url); void back.offsetWidth;
   back.style.transition = 'opacity .5s ease'; back.style.opacity = '1'; el._front = bk;
   setTimeout(() => { if (el._front === bk) front.style.opacity = '0'; }, 520);
 }
-const MORPH = 'left .7s cubic-bezier(.5,.05,.2,1), top .7s cubic-bezier(.5,.05,.2,1), width .7s cubic-bezier(.5,.05,.2,1), height .7s cubic-bezier(.5,.05,.2,1)';
-function layoutRepack(changed, instant) {
-  const vw = innerWidth, vh = innerHeight, g = Math.max(6, vw * 0.011);   // gutter → gaps between every work
-  const rects = packColumns(vw, vh);
-  const live = new Set();
-  for (let i = 0; i < repackN; i++) {
-    const r = rects[i]; if (!r) continue;
-    const el = cells[CELL_IDS[i]]; live.add(CELL_IDS[i]);
-    const appearing = el._packHidden || el.style.display === 'none';
-    el.style.display = ''; el._veil.style.opacity = '0'; el._packHidden = false;
-    el.style.transition = (instant || appearing) ? 'none' : MORPH;
-    el.style.left = ((r.x + g / 2) / vw * 100) + '%'; el.style.top = ((r.y + g / 2) / vh * 100) + '%';
-    el.style.width = (Math.max(1, r.w - g) / vw * 100) + '%'; el.style.height = (Math.max(1, r.h - g) / vh * 100) + '%';
-    if (instant) {
-      const lay = el._layers[el._front]; setLayerImg(lay, repackImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '1';
-    } else if (appearing) {
-      const lay = el._layers[el._front]; setLayerImg(lay, repackImgs[i].url); lay.style.opacity = '1';
-      el.style.opacity = '0'; void el.offsetWidth; el.style.transition = MORPH + ', opacity .5s ease'; el.style.opacity = '1';
-    } else {
-      el.style.opacity = '1';
-      if (changed.has(i)) swapImage(el, repackImgs[i].url);
-    }
+const ME = 'left .55s cubic-bezier(.4,.05,.2,1), top .55s cubic-bezier(.4,.05,.2,1), width .55s cubic-bezier(.4,.05,.2,1), height .55s cubic-bezier(.4,.05,.2,1)';
+// apply curRects to the cells. 'instant' snaps; 'morph' eases (local reflow only);
+// 'fade' fades the old frame out then the new positions/images in — a layout that
+// APPEARS, never slides across the canvas.
+function applyRects(transition, changed) {
+  const vw = innerWidth, vh = innerHeight;             // gaps come from the packer's natural gutter → boxes stay EXACT native AR (no inset distortion)
+  const live = new Set(); for (let i = 0; i < repackN; i++) if (curRects[i]) live.add(CELL_IDS[i]);
+  const setBox = (el, r, tr) => { el.style.transition = tr; el.style.transitionDelay = '0ms'; el.style.left = (r.x / vw * 100) + '%'; el.style.top = (r.y / vh * 100) + '%'; el.style.width = (r.w / vw * 100) + '%'; el.style.height = (r.h / vh * 100) + '%'; };
+  if (transition === 'fade') {
+    const vis = CELL_IDS.filter((id) => cells[id].style.display !== 'none' && !cells[id]._packHidden);
+    const apply = () => {
+      for (let i = 0; i < repackN; i++) { const r = curRects[i]; if (!r) continue; const el = cells[CELL_IDS[i]]; el.style.display = ''; el._veil.style.opacity = '0'; el._packHidden = false; setBox(el, r, 'none'); const lay = el._layers[el._front]; setLayerImg(lay, repackImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '0'; }
+      void grid.offsetWidth;
+      for (let i = 0; i < repackN; i++) { const r = curRects[i]; if (!r) continue; const el = cells[CELL_IDS[i]]; el.style.transition = 'opacity .5s ease'; el.style.transitionDelay = (i * 40) + 'ms'; el.style.opacity = '1'; }
+      CELL_IDS.forEach((id) => { if (!live.has(id)) hideRepack(cells[id], true); });
+    };
+    if (vis.length) { vis.forEach((id) => { const el = cells[id]; el.style.transition = 'opacity .28s ease'; el.style.transitionDelay = '0ms'; el.style.opacity = '0'; }); setTimeout(apply, 300); } else apply();
+    return;
   }
-  CELL_IDS.forEach((id) => { if (!live.has(id)) hideRepack(cells[id], instant); });
+  for (let i = 0; i < repackN; i++) {
+    const r = curRects[i]; if (!r) continue;
+    const el = cells[CELL_IDS[i]]; const appearing = el._packHidden || el.style.display === 'none';
+    el.style.display = ''; el._veil.style.opacity = '0'; el._packHidden = false;
+    setBox(el, r, (transition === 'instant' || appearing) ? 'none' : ME);
+    if (transition === 'instant') { const lay = el._layers[el._front]; setLayerImg(lay, repackImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '1'; }
+    else if (appearing) { const lay = el._layers[el._front]; setLayerImg(lay, repackImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '0'; void el.offsetWidth; el.style.transition = ME + ', opacity .45s ease'; el.style.opacity = '1'; }
+    else { el.style.opacity = '1'; if (changed && changed.has(i)) swapImage(el, repackImgs[i].url); }
+  }
+  CELL_IDS.forEach((id) => { if (!live.has(id)) hideRepack(cells[id], transition === 'instant'); });
 }
+function structuralBuild(transition) { colStruct = rollStruct(repackN); lastRoll = beatN; curRects = packMasonry(innerWidth, innerHeight); applyRects(transition); }
 function stepRepack(instant) {
   const N = Math.min(activeVoiceList().length, CELL_IDS.length);
   if (instant) {                                         // fresh build (mode enter)
-    repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = rollStruct(N); lastRoll = beatN;
-    for (let i = 0; i < N; i++) { repackImgs[i] = pickImg(); slotNext[i] = beatN + 1 + (i % 3); }
-    layoutRepack(new Set(), true); return;
+    repackN = N; repackImgs.length = N; slotNext.length = N;
+    for (let i = 0; i < N; i++) { repackImgs[i] = pickImg(); slotNext[i] = beatN + 2 + (i % 4); }
+    structuralBuild('instant'); return;
   }
-  const changed = new Set(); let structural = false;
-  if (N !== repackN) {                                   // tempo changed the image count
-    structural = true;
+  if (N !== repackN) {                                   // tempo changed the image count → a new layout appears
     if (N > repackN) for (let i = repackN; i < N; i++) { repackImgs[i] = pickImg(); slotNext[i] = beatN + periodFor(i); }
-    repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = rollStruct(N); lastRoll = beatN;
-  } else if (beatN - lastRoll >= LAYOUT_PERIOD) {        // re-roll the structure every bar → genuinely dynamic + seamless morph
-    lastRoll = beatN; colStruct = rollStruct(N); structural = true;
+    repackN = N; repackImgs.length = N; slotNext.length = N; structuralBuild('fade'); return;
   }
-  for (let i = 0; i < N; i++) { if (beatN >= slotNext[i]) { repackImgs[i] = pickImg(); slotNext[i] = beatN + periodFor(i); changed.add(i); } }   // images come and go
-  if (structural || changed.size) layoutRepack(changed, false);
+  if (beatN - lastRoll >= STRUCT_PERIOD) { structuralBuild('fade'); return; }   // a fresh unique layout fades in (appears, no slide)
+  const changed = new Set();
+  for (let i = 0; i < N; i++) { if (beatN >= slotNext[i]) { repackImgs[i] = pickImg(); slotNext[i] = beatN + periodFor(i); changed.add(i); } }   // images come and go in place
+  if (changed.size) { colStruct.forEach((c, ci) => { if (c.slots.some((si) => changed.has(si))) reflowColumn(ci); }); applyRects('morph', changed); }
 }
 
 // SUBDIVIDE in/out: keep the favored tiled layout, but let cells fade to BLACK
@@ -552,7 +555,7 @@ const labelChip = document.getElementById('labelChip');
 function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
 labelChip.addEventListener('click', toggleLabels);
 const fitChip = document.getElementById('fitChip');
-function toggleFit() { fitMode = !fitMode; fitChip.textContent = fitMode ? 'FIT' : 'FILL'; if (mode === 'repack' && repackN) layoutRepack(new Set(), false); }   // FIT = native AR + gaps, FILL = crop to fill
+function toggleFit() { fitMode = !fitMode; fitChip.textContent = fitMode ? 'FIT' : 'FILL'; if (mode === 'repack' && repackN) { curRects = packMasonry(innerWidth, innerHeight); applyRects('morph'); } }   // FIT = native AR + gaps, FILL = crop to fill
 fitChip.addEventListener('click', toggleFit);
 const MODE_KEYS = { '1': 'subdivide', '2': 'repack' };
 document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); else if (e.key === 'f' || e.key === 'F') toggleFit(); });
@@ -571,7 +574,7 @@ fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); })
 fader.addEventListener('pointerup', () => { drag = false; });
 fader.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') { bpm = Math.max(BPM_MIN, bpm - 2); paintFader(); } else if (e.key === 'ArrowRight') { bpm = Math.min(BPM_MAX, bpm + 2); paintFader(); } });
 playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
-window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (repackN) layoutRepack(new Set(), true); } else applyModeLayout(); });
+window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (repackN) { curRects = packMasonry(innerWidth, innerHeight); applyRects('instant'); } } else applyModeLayout(); });
 
 // choreographed entry — blocks assemble in, staggered
 function revealGrid() {
