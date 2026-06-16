@@ -18,9 +18,27 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r56-repack-masonry` (commit `876117f`, 2026-06-16) — REPACK is a
-**staggered native-AR masonry that fills the viewport, and whose layouts APPEAR (fade) rather
-than slide**. This is the r55 feedback addressed: r55's FIT was one flat centred row and its
+**Current build:** `r57-repack-r52-ar` (commit `bf2de12`, 2026-06-16) — REPACK worked back
+to **r52's collage bones** (the user's favourite) + two changes. Bones kept: a fixed
+**module-grid scaffold** of tiles (`buildScaffold` on a 20×13 / portrait 13×20 grid), big
+**black negative space**, images that **APPEAR in different places by fading** (`rotateRepack`
+relocates one image per bar — fade out here, fade in over there, never slides), tempo = how
+many tiles are lit. Changes:
+1. **No more cropping** — each tile is sized to its image's **native AR** (pick image → read
+   `arMap` → snap cell-dims to AR via a 3×3 integer search). Per-voice swaps + relocations
+   pick an AR-matched image (`nextImgForAR`) for the tile they land in. Gutter is a
+   **proportional shrink** (`GUT`, AR-exact). Verified dAR ≤ 0.04, no tile cropped beyond ~4%.
+2. **Singular beat = larger imagery** — tile target area scales inversely with the lit count:
+   60 BPM (1 voice) → one ~35–60% image; 104 BPM → five ~9% tiles. Relocation disabled at ≤2
+   lit so a single beat stays big and calm. Per-voice swaps re-enabled in repack (crossfade in
+   place) so imagery changes on the beat.
+Removed the r55/r56 masonry + FIT/FILL toggle (back to r52's chip set). **Repack history:** r51
+slice-grid → r52 fixed-AR tiles (user's favourite feel, but cropped) → r53 shelves → r54
+columns → r55 dynamic columns (slid too much) → r56 masonry → **r57 = r52 bones + AR-aware +
+tempo-size** (current). SUBDIVIDE unchanged; BREATHE tabled.
+
+**Older — r56:** `r56-repack-masonry` (commit `876117f`) — staggered native-AR masonry; the
+layouts APPEARED (fade) but it was a single-style masonry; superseded by r57 (r52 bones). This is the r55 feedback addressed: r55's FIT was one flat centred row and its
 imagery slid around the canvas (re-rolled + morphed every bar). Now:
 - **Staggered masonry** — `rollStruct` gives each column a varied **width** + vertical
   **offset**; `packMasonry` stacks native-AR images per column (height = colWidth / AR) then
