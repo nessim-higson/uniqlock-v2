@@ -18,10 +18,29 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r55-repack-dynamic` (commit `7f6acf8`, 2026-06-16) — REPACK is the
-**genuinely-dynamic synthesis** the user asked for, pulling together what they liked across
-builds: r52's **gaps + imagery coming in/out** and r51's **seamless whole-structure
-movement**. Engine:
+**Current build:** `r56-repack-masonry` (commit `876117f`, 2026-06-16) — REPACK is a
+**staggered native-AR masonry that fills the viewport, and whose layouts APPEAR (fade) rather
+than slide**. This is the r55 feedback addressed: r55's FIT was one flat centred row and its
+imagery slid around the canvas (re-rolled + morphed every bar). Now:
+- **Staggered masonry** — `rollStruct` gives each column a varied **width** + vertical
+  **offset**; `packMasonry` stacks native-AR images per column (height = colWidth / AR) then
+  **CONTAIN-fits** the whole arrangement to the viewport, so it fills the dominant dimension
+  and staggers (varied scales, ragged edges), black in the negative space. r52-style 2D
+  unique layouts. Boxes are **exact native AR** (dAR = 0) — gaps come from the packer's
+  natural gutter (`gN`), no inset distortion.
+- **No sliding** — structural re-rolls happen only every **4 bars** (`STRUCT_PERIOD = 16`) and
+  **fade in** (a fresh unique layout *appears*). In-place image swaps crossfade (`swapImage`);
+  an AR change reflows **only that column** locally (`reflowColumn`) — nothing else moves.
+- **FIT / FILL** toggle retained (chip + `f`): FIT = native AR + black; FILL = stretch
+  edge-to-edge, crop.
+Tempo = image count (1 parent at 60 BPM → 6 at max). **Repack history:** r51 slice-grid → r52
+fixed-AR tiles+gaps (cropped, user's favourite feel) → r53 native-AR shelves → r54 native-AR
+columns (butted, too static) → r55 dynamic columns (slid too much) → **r56 staggered masonry,
+fills viewport, layouts appear** (current). SUBDIVIDE unchanged; BREATHE tabled.
+
+**Older — r55:** `r55-repack-dynamic` (commit `7f6acf8`) — dynamic columns synthesis (gaps +
+in/out + seamless morph + FIT/FILL); superseded by r56 (it slid imagery around too much).
+Engine was:
 - **Dynamic structure** — `rollStruct(N)` re-rolls the column grouping AND order **every bar**
   (varied 1/2/3-stacks, shuffled so the **parent** can sit anywhere). Slot 0 stays a single
   parent column (its image persists; it just moves). The layout keeps changing — not a fixed
