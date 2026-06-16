@@ -72,6 +72,16 @@
   #overlay .wordmark { font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-size: 8vmin; font-weight: 700; letter-spacing: 0.12em; }
   #overlay .prompt { font-size: 2.2vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; max-width: 62ch; }
 
+  /* mobile: bump the UI type up — it was too small on a phone */
+  @media (max-width: 640px) {
+    .chip { font-size: 14px; padding: 7px 12px; }
+    #bpmlab { font-size: 14px; }
+    #status, #label { font-size: 13px; letter-spacing: 0.1em; }
+    .lab { font-size: 12px; padding: 3px 7px; }
+    #metro span { font-size: 11px; }
+    #overlay .wordmark { font-size: 12vmin; }
+    #overlay .prompt { font-size: 3.7vmin; line-height: 1.6; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .cell .ph, #bigclock, #grid { transition: none !important; }
   }
@@ -581,6 +591,7 @@ fader.addEventListener('pointerup', () => { drag = false; });
 fader.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') { bpm = Math.max(BPM_MIN, bpm - 2); paintFader(); } else if (e.key === 'ArrowRight') { bpm = Math.min(BPM_MAX, bpm + 2); paintFader(); } });
 playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
 window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (activeVoiceList().length === 1) { repackN = 1; placeMinBeat(true); } else if (repackN) layoutRepack(new Set(), true); } else applyModeLayout(); });
+document.addEventListener('pointerdown', () => { if (ctx && ctx.state === 'suspended') ctx.resume(); }, { passive: true });   // mobile: keep audio alive if iOS suspends the context
 
 // choreographed entry — blocks assemble in, staggered
 function revealGrid() {
