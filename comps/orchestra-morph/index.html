@@ -404,31 +404,29 @@ function rollStruct(N) {
   for (let k = cols.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [cols[k], cols[j]] = [cols[j], cols[k]]; }   // parent can sit anywhere
   return cols;
 }
-// columns of varying width. FIT = each image at its native AR (no crop); 1-image
-// column is full height (width = H·AR), a stack shares a width so its native-AR
-// images fill the height — leftover is black. FILL = the same column proportions
-// stretched to fill the width (images crop). a gutter (added in layoutRepack)
-// opens gaps between every work either way.
+// STAGGERED MASONRY that fills the viewport: columns share the full width (varied
+// widths), each column stacks its native-AR images, and the whole thing is scaled
+// so the TALLEST column fills the height — short columns leave ragged black at
+// their bottoms (distributed, not a centred island). FILL stretches stacks to full
+// height (crop). a gutter (added in layoutRepack) opens the gaps. stable per roll
+// (weights/offsets hashed from slot indices) so it morphs when the roll changes.
+function hash01(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
 function packColumns(vw, vh) {
-  const colW = colStruct.map((g) => g.length === 1 ? vh * arOf(g[0]) : vh / g.reduce((s, si) => s + 1 / arOf(si), 0));
-  const totalW = colW.reduce((a, b) => a + b, 0);
-  let widths, H, startX, yTop;
-  if (fitMode) {
-    const scale = totalW > vw ? vw / totalW : 1;
-    widths = colW.map((w) => w * scale); H = vh * scale;
-    const used = widths.reduce((a, b) => a + b, 0);
-    startX = (vw - used) * 0.5; yTop = (vh - H) * 0.5;            // centred → black at the sides (and top/bottom if scaled)
-  } else {
-    widths = colW.map((w) => w / totalW * vw); H = vh;            // stretch to fill the width → crop
-    startX = 0; yTop = 0;
+  const weights = colStruct.map((g, ci) => 0.7 + hash01(g[0] + ci * 7.3) * 0.95);
+  const wsum = weights.reduce((a, b) => a + b, 0);
+  const cw = weights.map((w) => w / wsum * vw);                       // columns fill the full width
+  if (!fitMode) {                                                     // FILL: full-height columns, stack split by AR → crop
+    const rects = new Array(repackN); let cx = 0;
+    colStruct.forEach((g, ci) => { const W = cw[ci], inv = g.reduce((s, si) => s + 1 / arOf(si), 0); let cy = 0; g.forEach((si) => { const h = vh * (1 / arOf(si)) / inv; rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); cx += W; });
+    return rects;
   }
+  const offs = colStruct.map((g) => hash01(g[0] * 3.1 + 1) * 0.13);  // small vertical stagger per column
+  const colH = colStruct.map((g, ci) => (offs[ci] * vh) + g.reduce((s, si) => s + cw[ci] / arOf(si), 0));
+  const s = Math.min(1.55, Math.max(0.55, vh / Math.max(...colH)));  // scale so the tallest column fills the height (native AR kept; side overflow clips)
+  const widths = cw.map((w) => w * s);
+  const used = widths.reduce((a, b) => a + b, 0), startX = (vw - used) * 0.5;
   const rects = new Array(repackN); let cx = startX;
-  colStruct.forEach((g, ci) => {
-    const W = widths[ci]; let cy = yTop;
-    if (fitMode) g.forEach((si) => { const h = W / arOf(si); rects[si] = { x: cx, y: cy, w: W, h }; cy += h; });
-    else { const inv = g.reduce((s, si) => s + 1 / arOf(si), 0); g.forEach((si) => { const h = H * (1 / arOf(si)) / inv; rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); }
-    cx += W;
-  });
+  colStruct.forEach((g, ci) => { const W = widths[ci]; let cy = offs[ci] * vh * s; g.forEach((si) => { const h = W / arOf(si); rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); cx += W; });
   return rects;
 }
 function swapImage(el, url) {                            // crossfade the image inside a cell (content morph)
