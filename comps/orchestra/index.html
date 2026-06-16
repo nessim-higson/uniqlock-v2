@@ -93,7 +93,6 @@
 <div id="modes">
   <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
   <div class="chip on" data-mode="repack">REPACK</div>
-  <div class="chip" data-mode="breathe">BREATHE</div>
   <div class="chip sep">·</div>
   <div class="chip on" id="labelChip">LABELS</div>
 </div>
@@ -305,28 +304,9 @@ function applyLayout(lay, key) {
   baseCols = [...o.cols]; baseRows = [...o.rows]; curPlace = o.place;
 }
 
-// BREATHE, cracked: the old version swelled grid TRACKS, so one cell's inhale
-// shrank every neighbour — a global, per-beat jitter. now the breath is LOCAL
-// (scale inside the hero cell's own frame, neighbours never move) and SLOW
-// (one calm inhale/exhale per bar on the single lead block).
-function doBreathe(heroArea) {
-  const beatMs = (60 / bpm) * 1000;
-  CELL_IDS.forEach((id) => {
-    const el = cells[id], inr = el._inner;
-    if (id === heroArea && el.style.display !== 'none') {
-      inr.style.transition = 'transform ' + (beatMs * 1.7) + 'ms cubic-bezier(.37,0,.4,1), filter ' + (beatMs * 1.7) + 'ms ease';
-      inr.style.transform = 'scale(1.06)'; inr.style.filter = 'brightness(1.07)';
-      clearTimeout(el._breathTO);
-      el._breathTO = setTimeout(() => {
-        inr.style.transition = 'transform ' + (beatMs * 2.1) + 'ms cubic-bezier(.4,0,.5,1), filter ' + (beatMs * 2.1) + 'ms ease';
-        inr.style.transform = 'scale(1)'; inr.style.filter = 'brightness(1)';
-      }, beatMs * 1.5);
-    } else if (inr.style.transform && inr.style.transform !== 'scale(1)') {
-      inr.style.transition = 'transform ' + (beatMs * 1.4) + 'ms ease, filter ' + (beatMs * 1.4) + 'ms ease';
-      inr.style.transform = 'scale(1)'; inr.style.filter = 'brightness(1)';
-    }
-  });
-}
+// BREATHE — TABLED (2026-06-16). Two attempts: global track-swell (distracting
+// jitter) and local image-scale (too inert). Neither landed; parked rather than
+// chase a third. The .inner layer it needed is left in place, harmless.
 
 // ── the voices, their flash/swap, and the rotating voice → block binding ──
 const AREAS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
@@ -353,7 +333,8 @@ function fire(vname, n, t, audioFn) {
   beatFired.push({ area, strong: STRONG.has(vname) });
   setTimeout(() => {
     const el = cells[area];
-    if (el.style.display === 'none') return;
+    if (el.style.display === 'none' || el._rotating) return;   // skip a swap on a hidden or relocating tile
+    if (el._veil && el._veil.style.opacity === '1') return;    // skip a swap on a blacked-out (negative-space) tile
     if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; }
     else if (spec.flash) popFlash(el, spec.flash, 260, '#fff');
   }, Math.max(0, (t - ctx.currentTime) * 1000));
@@ -382,82 +363,121 @@ function buildSubdivide() {
   return { cols: tpl.cols, rows: tpl.rows, place };
 }
 
-// ── REPACK, reworked: a constantly-recomposing tempo-density packer ──
-// the old repack only swapped between 4 fixed layouts once per 32-beat section.
-// this hybrid keeps subdivide's idea (tempo = how many images are alive) but
-// recomposes EVERY BAR via a guillotine slice — varied, gapless rectangles —
-// and lets some regions fall to BLACK (negative space) instead of always
-// holding an image. raise the tempo and more voices + images form in.
 let packSeed = 20260616 >>> 0;
 function rng() { packSeed = (packSeed * 1664525 + 1013904223) >>> 0; return packSeed / 4294967296; }
-function sliceRects(n) {
-  let rects = [{ x: 0, y: 0, w: 1, h: 1 }];
-  while (rects.length < n) {
-    rects.sort((a, b) => b.w * b.h - a.w * a.h);   // always split the largest region
-    const r = rects.shift();
-    const vert = r.w >= r.h;                        // cut across the longer axis → no slivers
-    const f = 0.36 + rng() * 0.28;                  // 0.36..0.64 split
-    if (vert) rects.push({ x: r.x, y: r.y, w: r.w * f, h: r.h }, { x: r.x + r.w * f, y: r.y, w: r.w * (1 - f), h: r.h });
-    else rects.push({ x: r.x, y: r.y, w: r.w, h: r.h * f }, { x: r.x, y: r.y + r.h * f, w: r.w, h: r.h * (1 - f) });
+
+// ── REPACK, reworked again (2026-06-16): a STILL collage, not a moving grid ──
+// the boxes do NOT slide. a stable scaffold of fixed-aspect-ratio tiles is
+// packed onto a fine module grid with GAPS — it does NOT cover the viewport
+// 100%; the empty cells read as black negative space. tempo sets how many tiles
+// are LIT (1 image at 60 BPM, more form in as you slide up). periodically the
+// system relocates an image to a different free tile — fading it out here and
+// in over there, never translating — so images "appear in different places it
+// sees fit" while black opens and closes. per-voice swaps still change the
+// image inside a lit tile in place.
+let GC = 14, GR = 9;
+const TILE = [[3, 3], [4, 3], [3, 4], [4, 4], [5, 4], [4, 5], [5, 5], [6, 4], [4, 6]];
+const GUT = 0.7;                                       // % viewport gutter inset per side → the black gaps
+const REPACK_PERIOD = 4;                               // a relocation every 4 beats (one bar)
+let scaffold = [], slotByVoice = {}, lastTierCount = -1, repackBar = -1;
+// pack up to maxTiles fixed-AR tiles onto a fine module grid, NO overlap; a
+// coverage cap leaves whole cells empty (big black negative space), and the
+// render-time gutter (GUT) opens a consistent gap around every tile.
+function buildScaffold(maxTiles, coverCap) {
+  const portrait = innerHeight > innerWidth;
+  GC = portrait ? 9 : 14; GR = portrait ? 14 : 9;
+  const occ = Array.from({ length: GR }, () => new Array(GC).fill(false));
+  const total = GC * GR; let covered = 0; const rects = []; let tries = 0;
+  while (rects.length < maxTiles && tries < 400) {
+    tries++;
+    const tl = TILE[Math.floor(rng() * TILE.length)];
+    let tw = tl[0], th = tl[1];
+    if (portrait) { const t = tw; tw = th; th = t; }   // taller tiles in portrait
+    if (tw > GC || th > GR) continue;
+    if (rects.length >= 1 && (covered + tw * th) / total > coverCap) continue;
+    const cx = Math.floor(rng() * (GC - tw + 1)), cy = Math.floor(rng() * (GR - th + 1));
+    let free = true;
+    for (let y = cy; y < cy + th && free; y++) for (let x = cx; x < cx + tw; x++) { if (occ[y][x]) { free = false; break; } }
+    if (!free) continue;
+    for (let y = cy; y < cy + th; y++) for (let x = cx; x < cx + tw; x++) occ[y][x] = true;
+    covered += tw * th;
+    rects.push({ x: cx / GC, y: cy / GR, w: tw / GC, h: th / GR });
   }
+  rects.sort((a, b) => b.w * b.h - a.w * a.h);          // biggest first → hierarchy
   return rects;
 }
-let packBar = -1, lastLiveCount = -1;
-function placeCell(el, rect, isVoid, instant) {
-  const Lx = (rect.x * 100) + '%', Ty = (rect.y * 100) + '%', W = (rect.w * 100) + '%', H = (rect.h * 100) + '%';
-  const appearing = el._packHidden || el.style.display === 'none';
-  el.style.display = '';
-  const tr = 'left .7s cubic-bezier(.5,.05,.2,1), top .7s cubic-bezier(.5,.05,.2,1), width .7s cubic-bezier(.5,.05,.2,1), height .7s cubic-bezier(.5,.05,.2,1), opacity .55s ease';
-  if (instant || appearing) {
-    el.style.transition = 'none';
-    el.style.left = Lx; el.style.top = Ty; el.style.width = W; el.style.height = H;
-    el.style.opacity = (appearing && !instant) ? '0' : '1';
-    void el.offsetWidth;
-    el.style.transition = tr;
-    if (appearing && !instant) el.style.opacity = '1';
-  } else {
-    el.style.transition = tr;
-    el.style.left = Lx; el.style.top = Ty; el.style.width = W; el.style.height = H; el.style.opacity = '1';
-  }
+function setRect(el, r) {
+  el.style.transition = 'none';                        // positions NEVER animate — images don't move
+  el.style.left = (r.x * 100 + GUT) + '%'; el.style.top = (r.y * 100 + GUT) + '%';
+  el.style.width = (r.w * 100 - 2 * GUT) + '%'; el.style.height = (r.h * 100 - 2 * GUT) + '%';
+  void el.offsetWidth;
+}
+function showCell(el, r, instant) {
+  el.style.display = ''; setRect(el, r); el._veil.style.opacity = '0';
+  const lay = el._layers[el._front];
+  if (!lay.src) lay.src = nextImg();                   // fill if this tile was never used
+  lay.style.opacity = '1';
+  if (instant) { el.style.transition = 'none'; el.style.opacity = '1'; }
+  else { el.style.opacity = '0'; void el.offsetWidth; el.style.transition = 'opacity .5s ease'; el.style.opacity = '1'; }
   el._packHidden = false;
-  el._veil.style.opacity = isVoid ? '1' : '0';
 }
-function hideCell(el, instant) {
-  el._veil.style.opacity = '0';
-  if (instant) { el._packHidden = true; el.style.display = 'none'; el.style.opacity = '0'; return; }
-  if (el._packHidden) return;
-  el._packHidden = true;
+function hideRepack(el, instant) {
+  el._veil.style.opacity = '0'; el._packHidden = true;
+  if (instant) { el.style.display = 'none'; el.style.opacity = '0'; return; }
   el.style.transition = 'opacity .45s ease'; el.style.opacity = '0';
-  setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 480);
+  setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 460);
 }
-function applyPack(instant) {
-  const voices = activeVoiceList(), n = voices.length;
-  const rects = sliceRects(n);
-  rects.sort((a, b) => b.w * b.h - a.w * a.h);       // biggest first → visual hierarchy
-  const others = voices.filter((v) => v !== 'pulse');
-  for (let i = others.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [others[i], others[j]] = [others[j], others[i]]; }
-  const pulseRect = (n > 1 && rng() < 0.4) ? 1 : 0;  // PULSE biased to a large region, not always #1
-  const assign = { pulse: pulseRect };
-  let ri = 0; others.forEach((v) => { while (ri === pulseRect) ri++; assign[v] = ri++; });
-  const maxBlack = Math.max(0, Math.floor((n - 1) / 2));   // more density → more negative space allowed
-  let blacks = 0; const voidSet = new Set();
-  others.forEach((v) => { if (blacks < maxBlack && rng() < 0.3) { voidSet.add(v); blacks++; } });
-  const liveAreas = new Set();
-  voices.forEach((v) => { const area = binding[v]; liveAreas.add(area); placeCell(cells[area], rects[assign[v]], voidSet.has(v), instant); });
-  CELL_IDS.forEach((id) => { if (!liveAreas.has(id)) hideCell(cells[id], instant); });
+function buildAndPlace(instant) {
+  const voices = activeVoiceList();
+  VOICES.forEach((v, i) => { binding[v] = AREAS[i]; }); // identity binding so per-voice swaps hit the right tile
+  scaffold = buildScaffold(voices.length + 3, 0.84);    // a few spare positions for relocation; never a full fill
+  const n = Math.min(voices.length, scaffold.length);   // light `tempo` tiles; the rest stay black (negative space)
+  slotByVoice = {}; const activeCells = new Set();
+  for (let i = 0; i < n; i++) { const v = voices[i]; slotByVoice[v] = i; activeCells.add(binding[v]); showCell(cells[binding[v]], scaffold[i], instant); }
+  CELL_IDS.forEach((id) => { if (!activeCells.has(id)) hideRepack(cells[id], instant); });
+}
+// relocate one lit image to a free tile — fade out here, reappear over there
+function rotateRepack() {
+  const occupied = new Set(Object.values(slotByVoice));
+  const free = []; for (let i = 0; i < scaffold.length; i++) if (!occupied.has(i)) free.push(i);
+  if (!free.length) return;
+  const vs = Object.keys(slotByVoice); if (!vs.length) return;
+  const v = vs[Math.floor(rng() * vs.length)], el = cells[binding[v]];
+  const newSlot = free[Math.floor(rng() * free.length)];
+  slotByVoice[v] = newSlot; el._rotating = true;
+  el.style.transition = 'opacity .42s ease'; el.style.opacity = '0';
+  setTimeout(() => {
+    if (mode !== 'repack') { el._rotating = false; return; }
+    setRect(el, scaffold[newSlot]);
+    const u = nextImg(); if (u) el._layers[el._front].src = u;   // a fresh image in the new place
+    el.style.transition = 'opacity .5s ease'; el.style.opacity = '1'; el._rotating = false;
+  }, 440);
+}
+
+// SUBDIVIDE in/out: keep the favored tiled layout, but let cells fade to BLACK
+// and back — images come in and out, and black areas open up in the grid.
+let subVeiled = new Set();
+function subdivideInOut() {
+  if (beatN % 4 !== 1) return;                          // once a bar
+  [...subVeiled].forEach((id) => { if (cells[id].style.display === 'none') { cells[id]._veil.style.opacity = '0'; subVeiled.delete(id); } });
+  const cand = activeVoiceList().filter((v) => v !== 'pulse').map((v) => binding[v]);
+  if (!cand.length) return;
+  const id = cand[Math.floor(rng() * cand.length)], el = cells[id];
+  if (el.style.display === 'none') return;
+  if (subVeiled.has(id)) { el._veil.style.opacity = '0'; subVeiled.delete(id); }   // bring image back in
+  else if (rng() < 0.5) { el._veil.style.opacity = '1'; subVeiled.add(id); }       // open black
 }
 
 function applyModeLayout() {
   const sec = Math.max(0, curSection);
-  if (mode === 'breathe') applyLayout(L.broadcast, 'broadcast');
-  else if (mode === 'subdivide') applyLayout(buildSubdivide(), 'sub' + activeVoiceList().length + '-' + sec);
+  if (mode === 'subdivide') applyLayout(buildSubdivide(), 'sub' + activeVoiceList().length + '-' + sec);
 }
 
 function beat(n, t) {
   const s = 60 / bpm;
   const L1 = bpm >= 74, L2 = bpm >= 88, L3 = bpm >= 102, L4 = bpm >= 116;
   const section = Math.floor((n - 1) / 32);
-  if (section !== curSection) { curSection = section; VOICES.forEach((v, i) => { binding[v] = AREAS[(i + section) % AREAS.length]; }); relabel(); }
+  if (section !== curSection) { curSection = section; if (mode !== 'repack') VOICES.forEach((v, i) => { binding[v] = AREAS[(i + section) % AREAS.length]; }); relabel(); }
 
   fire('pulse', n, t, () => subThud(t, 50, 30, s * 1.8, 0.72));
   if (L1 && n % 8 === 0) fire('groanA', n, t, () => voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }));
@@ -471,12 +491,13 @@ let metroDeg = 0;
 function onBeat() {
   beatN++; beatFired = [];
   if (ctx) beat(beatN, ctx.currentTime);
-  if (mode === 'repack') {                               // recompose every bar, or the instant tempo crosses a tier
-    const live = activeVoiceList().length, bar = Math.floor((beatN - 1) / 4);
-    if (live !== lastLiveCount || bar !== packBar) { packBar = bar; lastLiveCount = live; applyPack(false); }
+  if (mode === 'repack') {
+    const live = activeVoiceList().length;
+    if (live !== lastTierCount) { lastTierCount = live; repackBar = Math.floor((beatN - 1) / REPACK_PERIOD); buildAndPlace(false); }  // tempo changed → rebuild the scaffold
+    else { const bar = Math.floor((beatN - 1) / REPACK_PERIOD); if (bar !== repackBar) { repackBar = bar; rotateRepack(); } }     // else relocate one image
   } else {
     applyModeLayout();
-    if (mode === 'breathe' && !RM && beatN % 4 === 1) doBreathe(binding['pulse']);  // one slow breath per bar, on the lead
+    if (mode === 'subdivide') subdivideInOut();
   }
   if (!RM) { metroDeg += 90; metro.style.transform = 'rotate(' + metroDeg + 'deg)'; }  // the mark keeps time
   statusEl.textContent = 'ORCHESTRA · STRATA · ' + mode.toUpperCase() + ' · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
@@ -491,20 +512,21 @@ requestAnimationFrame(loop);
 // ── controls ──
 function setMode(m) {
   mode = m; lastLayoutKey = '';
-  if (m !== 'repack') {                                  // tear down absolute pack positioning, restore grid
+  CELL_IDS.forEach((id) => { cells[id]._veil.style.opacity = '0'; });   // clear any black holes on switch
+  subVeiled.clear();
+  if (m !== 'repack') {                                  // tear down absolute positioning, restore the grid
     grid.classList.remove('pack');
-    CELL_IDS.forEach((id) => { const el = cells[id]; el.style.left = el.style.top = el.style.width = el.style.height = ''; el.style.transition = ''; el.style.opacity = ''; el.style.display = ''; el._packHidden = false; el._veil.style.opacity = '0'; });
+    CELL_IDS.forEach((id) => { const el = cells[id]; el.style.left = el.style.top = el.style.width = el.style.height = ''; el.style.transition = ''; el.style.opacity = ''; el.style.display = ''; el._packHidden = false; el._rotating = false; });
   }
-  if (m !== 'breathe') CELL_IDS.forEach((id) => { const inr = cells[id]._inner; inr.style.transition = ''; inr.style.transform = ''; inr.style.filter = ''; });
   document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.classList.toggle('on', c.dataset.mode === m));
-  if (m === 'repack') { grid.classList.add('pack'); lastLiveCount = -1; packBar = -1; applyPack(true); }
+  if (m === 'repack') { grid.classList.add('pack'); lastTierCount = -1; repackBar = -1; buildAndPlace(true); }
   else applyModeLayout();
 }
 document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventListener('click', () => setMode(c.dataset.mode)));
 const labelChip = document.getElementById('labelChip');
 function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
 labelChip.addEventListener('click', toggleLabels);
-const MODE_KEYS = { '1': 'subdivide', '2': 'repack', '3': 'breathe' };
+const MODE_KEYS = { '1': 'subdivide', '2': 'repack' };
 document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); });
 
 // keyboard access for the chip/button controls
@@ -548,7 +570,7 @@ overlay.addEventListener('click', async () => {
   await manifestReady;
   initImages();
   paintFader();
-  if (mode === 'repack') { grid.classList.add('pack'); lastLiveCount = -1; packBar = -1; applyPack(true); }
+  if (mode === 'repack') { grid.classList.add('pack'); lastTierCount = -1; repackBar = -1; buildAndPlace(true); }
   else applyModeLayout();
   revealGrid();
   overlay.classList.add('leaving');
