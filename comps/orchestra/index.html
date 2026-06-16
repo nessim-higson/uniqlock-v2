@@ -94,6 +94,7 @@
   <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
   <div class="chip on" data-mode="repack">REPACK</div>
   <div class="chip sep">·</div>
+  <div class="chip on" id="fitChip">FIT</div>
   <div class="chip on" id="labelChip">LABELS</div>
 </div>
 
@@ -376,7 +377,8 @@ function rng() { packSeed = (packSeed * 1664525 + 1013904223) >>> 0; return pack
 // is black. a few "parent" slots (slot 0 first) persist longer while inner
 // slots swap faster; every swap relayouts and the boxes ANIMATE to the new fit,
 // so the grid flows. PULSE/voices no longer bind tiles here — cells are indexed.
-let repackImgs = [], slotNext = [], repackN = 0, colStruct = [], relayoutTO = 0;
+let repackImgs = [], slotNext = [], repackN = 0, colStruct = [], relayoutTO = 0, lastRoll = -99, fitMode = true;
+const LAYOUT_PERIOD = 4;                                // re-roll the whole layout every bar → seamless structural morph
 function periodFor(i) { return Math.max(2, 5 - i); }   // beats a slot holds before swapping; parent (slot 0) lives longest
 function pickImg() { return { url: nextImg() }; }
 function arOf(i) { return arMap[repackImgs[i].url] || 0.72; }   // read AR fresh each layout (it may load after the pick)
@@ -391,30 +393,40 @@ function hideRepack(el, instant) {
   el.style.transition = 'opacity .4s ease'; el.style.opacity = '0';
   setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 420);
 }
-// slot 0 is a single full-height "parent" column; the rest group into columns of
-// one or two stacked images. stable until tempo changes → morph comes from the
-// images (and their ARs) swapping within this structure, not from re-grouping.
-function buildColStruct(N) {
-  const cols = []; if (N <= 0) return cols;
-  cols.push([0]);
-  let i = 1; while (i < N) { if (N - i >= 2) { cols.push([i, i + 1]); i += 2; } else { cols.push([i]); i += 1; } }
+// GENUINELY DYNAMIC structure: slot 0 is always a single "parent" column (its
+// image persists; it just moves), the rest group randomly into 1/2/3 stacks and
+// the column ORDER is shuffled — re-rolled every bar so the layout keeps
+// changing. the whole structure then morphs to the new roll (seamless movement).
+function rollStruct(N) {
+  if (N <= 1) return [[0]];
+  const cols = [[0]]; let i = 1;
+  while (i < N) { const rem = N - i; const take = (rem >= 3 && rng() < 0.22) ? 3 : (rem >= 2 && rng() < 0.5) ? 2 : 1; const g = []; for (let k = 0; k < take; k++) g.push(i + k); cols.push(g); i += take; }
+  for (let k = cols.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [cols[k], cols[j]] = [cols[j], cols[k]]; }   // parent can sit anywhere
   return cols;
 }
-// columns of native-AR images that BUTT: a 1-image column is full height, width
-// = H·AR; a 2-image column shares a width chosen so the two native-AR images
-// stack to exactly fill the height. columns scale together if they overrun the
-// width; leftover is centred → black at the sides (and top/bottom if scaled).
+// columns of varying width. FIT = each image at its native AR (no crop); 1-image
+// column is full height (width = H·AR), a stack shares a width so its native-AR
+// images fill the height — leftover is black. FILL = the same column proportions
+// stretched to fill the width (images crop). a gutter (added in layoutRepack)
+// opens gaps between every work either way.
 function packColumns(vw, vh) {
   const colW = colStruct.map((g) => g.length === 1 ? vh * arOf(g[0]) : vh / g.reduce((s, si) => s + 1 / arOf(si), 0));
-  const total = colW.reduce((a, b) => a + b, 0);
-  const scale = total > vw ? vw / total : 1;
-  const widths = colW.map((w) => w * scale), H = vh * scale;
-  const used = widths.reduce((a, b) => a + b, 0);
-  const startX = (vw - used) * 0.5, yTop = (vh - H) * 0.5;
+  const totalW = colW.reduce((a, b) => a + b, 0);
+  let widths, H, startX, yTop;
+  if (fitMode) {
+    const scale = totalW > vw ? vw / totalW : 1;
+    widths = colW.map((w) => w * scale); H = vh * scale;
+    const used = widths.reduce((a, b) => a + b, 0);
+    startX = (vw - used) * 0.5; yTop = (vh - H) * 0.5;            // centred → black at the sides (and top/bottom if scaled)
+  } else {
+    widths = colW.map((w) => w / totalW * vw); H = vh;            // stretch to fill the width → crop
+    startX = 0; yTop = 0;
+  }
   const rects = new Array(repackN); let cx = startX;
   colStruct.forEach((g, ci) => {
     const W = widths[ci]; let cy = yTop;
-    g.forEach((si) => { const h = W / arOf(si); rects[si] = { x: cx, y: cy, w: W, h }; cy += h; });
+    if (fitMode) g.forEach((si) => { const h = W / arOf(si); rects[si] = { x: cx, y: cy, w: W, h }; cy += h; });
+    else { const inv = g.reduce((s, si) => s + 1 / arOf(si), 0); g.forEach((si) => { const h = H * (1 / arOf(si)) / inv; rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); }
     cx += W;
   });
   return rects;
@@ -427,7 +439,7 @@ function swapImage(el, url) {                            // crossfade the image 
 }
 const MORPH = 'left .7s cubic-bezier(.5,.05,.2,1), top .7s cubic-bezier(.5,.05,.2,1), width .7s cubic-bezier(.5,.05,.2,1), height .7s cubic-bezier(.5,.05,.2,1)';
 function layoutRepack(changed, instant) {
-  const vw = innerWidth, vh = innerHeight;
+  const vw = innerWidth, vh = innerHeight, g = Math.max(6, vw * 0.011);   // gutter → gaps between every work
   const rects = packColumns(vw, vh);
   const live = new Set();
   for (let i = 0; i < repackN; i++) {
@@ -436,8 +448,8 @@ function layoutRepack(changed, instant) {
     const appearing = el._packHidden || el.style.display === 'none';
     el.style.display = ''; el._veil.style.opacity = '0'; el._packHidden = false;
     el.style.transition = (instant || appearing) ? 'none' : MORPH;
-    el.style.left = (r.x / vw * 100) + '%'; el.style.top = (r.y / vh * 100) + '%';
-    el.style.width = (r.w / vw * 100) + '%'; el.style.height = (r.h / vh * 100) + '%';
+    el.style.left = ((r.x + g / 2) / vw * 100) + '%'; el.style.top = ((r.y + g / 2) / vh * 100) + '%';
+    el.style.width = (Math.max(1, r.w - g) / vw * 100) + '%'; el.style.height = (Math.max(1, r.h - g) / vh * 100) + '%';
     if (instant) {
       const lay = el._layers[el._front]; setLayerImg(lay, repackImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '1';
     } else if (appearing) {
@@ -453,17 +465,19 @@ function layoutRepack(changed, instant) {
 function stepRepack(instant) {
   const N = Math.min(activeVoiceList().length, CELL_IDS.length);
   if (instant) {                                         // fresh build (mode enter)
-    repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = buildColStruct(N);
+    repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = rollStruct(N); lastRoll = beatN;
     for (let i = 0; i < N; i++) { repackImgs[i] = pickImg(); slotNext[i] = beatN + 1 + (i % 3); }
     layoutRepack(new Set(), true); return;
   }
   const changed = new Set(); let structural = false;
-  if (N !== repackN) {                                   // tempo changed the image count → re-group columns
+  if (N !== repackN) {                                   // tempo changed the image count
     structural = true;
     if (N > repackN) for (let i = repackN; i < N; i++) { repackImgs[i] = pickImg(); slotNext[i] = beatN + periodFor(i); }
-    repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = buildColStruct(N);
+    repackN = N; repackImgs.length = N; slotNext.length = N; colStruct = rollStruct(N); lastRoll = beatN;
+  } else if (beatN - lastRoll >= LAYOUT_PERIOD) {        // re-roll the structure every bar → genuinely dynamic + seamless morph
+    lastRoll = beatN; colStruct = rollStruct(N); structural = true;
   }
-  for (let i = 0; i < N; i++) { if (beatN >= slotNext[i]) { repackImgs[i] = pickImg(); slotNext[i] = beatN + periodFor(i); changed.add(i); } }
+  for (let i = 0; i < N; i++) { if (beatN >= slotNext[i]) { repackImgs[i] = pickImg(); slotNext[i] = beatN + periodFor(i); changed.add(i); } }   // images come and go
   if (structural || changed.size) layoutRepack(changed, false);
 }
 
@@ -537,11 +551,14 @@ document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventLi
 const labelChip = document.getElementById('labelChip');
 function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
 labelChip.addEventListener('click', toggleLabels);
+const fitChip = document.getElementById('fitChip');
+function toggleFit() { fitMode = !fitMode; fitChip.textContent = fitMode ? 'FIT' : 'FILL'; if (mode === 'repack' && repackN) layoutRepack(new Set(), false); }   // FIT = native AR + gaps, FILL = crop to fill
+fitChip.addEventListener('click', toggleFit);
 const MODE_KEYS = { '1': 'subdivide', '2': 'repack' };
-document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); });
+document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); else if (e.key === 'f' || e.key === 'F') toggleFit(); });
 
 // keyboard access for the chip/button controls
-[playBtn, labelChip, fader, ...document.querySelectorAll('#modes .chip[data-mode]')].forEach((el) => {
+[playBtn, labelChip, fitChip, fader, ...document.querySelectorAll('#modes .chip[data-mode]')].forEach((el) => {
   el.tabIndex = 0; el.setAttribute('role', 'button');
   el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && el !== fader) { e.preventDefault(); el.click(); } });
 });
