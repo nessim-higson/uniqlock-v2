@@ -192,16 +192,26 @@ function doTransition(el, spec) {
   const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
   back.src = u;
   back.style.zIndex = '1'; front.style.zIndex = '0';
+  const beatMs = (60 / bpm) * 1000, dur = Math.max(80, Math.min(spec.dur, beatMs * 0.95));
   if (RM || spec.kind === 'cut') {                       // instant cut (also the reduced-motion path)
-    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1';
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0';
     void back.offsetWidth; front.style.opacity = '0'; el._front = bk; if (spec.kind === 'cut') popFlash(el, 0.22, 110); return;
   }
-  const beatMs = (60 / bpm) * 1000, dur = Math.max(80, Math.min(spec.dur, beatMs * 0.95));
-  let kind = spec.kind, side = null;
-  if (kind === 'pull') side = SIDES[pulseSide++ % SIDES.length];
-  let initClip = 'inset(0 0 0 0)', initT = 'none', initO = '1';
-  if (kind === 'pull') initClip = side === 'up' ? 'inset(100% 0 0 0)' : side === 'down' ? 'inset(0 0 100% 0)' : side === 'left' ? 'inset(0 0 0 100%)' : 'inset(0 100% 0 0)';
-  else if (kind === 'wipe') initClip = 'inset(0 100% 0 0)';
+  if (spec.kind === 'pull') {                            // the crna move: new image sits full BEHIND,
+    const side = SIDES[pulseSide++ % SIDES.length];      // old image pulls back + masks away on top
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0'; back.style.zIndex = '0';
+    front.style.zIndex = '1'; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '1'; front.style.borderRadius = '0'; front.style.clipPath = 'inset(0 0 0 0)';
+    void front.offsetWidth;
+    const sh = side === 'up' ? 'translateY(-20%)' : side === 'down' ? 'translateY(20%)' : side === 'left' ? 'translateX(-20%)' : 'translateX(20%)';
+    const clip = side === 'up' ? 'inset(100% 0 0 0)' : side === 'down' ? 'inset(0 0 100% 0)' : side === 'left' ? 'inset(0 0 0 100%)' : 'inset(0 100% 0 0)';
+    front.style.transition = `transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}, border-radius ${dur}ms ${EASE}, clip-path ${dur}ms ${EASE}`;
+    front.style.transform = sh + ' scale(.82)'; front.style.opacity = '.35'; front.style.borderRadius = '2.2vmin'; front.style.clipPath = clip;
+    el._front = bk;
+    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.borderRadius = '0'; front.style.clipPath = 'inset(0 0 0 0)'; front.style.zIndex = '0'; }, dur + 40);
+    return;
+  }
+  let kind = spec.kind, initClip = 'inset(0 0 0 0)', initT = 'none', initO = '1';
+  if (kind === 'wipe') initClip = 'inset(0 100% 0 0)';
   else if (kind === 'scale') { initT = 'scale(1.16)'; initO = '0'; }
   else if (kind === 'dissolve') initO = '0';
   back.style.transition = 'none'; back.style.clipPath = initClip; back.style.transform = initT; back.style.opacity = initO;
