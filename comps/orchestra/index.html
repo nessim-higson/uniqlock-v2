@@ -72,8 +72,6 @@
     .cell .ph, #bigclock, #grid { transition: none !important; }
   }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/CustomEase.min.js"></script>
 </head>
 <body>
 
@@ -116,9 +114,8 @@
 <script type="module">
 import { loadImageryManifest } from '../../js/data.js';
 
-const gsap = window.gsap;
-gsap && window.CustomEase && gsap.registerPlugin(window.CustomEase);
-gsap && window.CustomEase && window.CustomEase.create('pageTransition', 'M0,0 C0.38,0.05 0.48,0.58 0.65,0.82 0.82,1 1,1 1,1');
+// a close approximation of r25's GSAP 'pageTransition' CustomEase
+const CRNA_EASE = 'cubic-bezier(.45,.05,.2,1)';
 // the r25 crna move: incoming reveals via clip-path from an edge while the
 // outgoing pulls back + away + fades, cycling all four sides.
 const CRNA = [
@@ -211,16 +208,18 @@ function doTransition(el, spec) {
     back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0';
     void back.offsetWidth; front.style.opacity = '0'; el._front = bk; if (spec.kind === 'cut') popFlash(el, 0.22, 110); return;
   }
-  if (spec.kind === 'crna' && gsap) {                    // the r25 transition, verbatim: incoming clip-
-    const s = CRNA[pulseSide++ % CRNA.length];           // reveals on top, outgoing pulls back behind
-    const d = Math.min(0.7, (60 / bpm) * 0.95);
-    gsap.killTweensOf([back, front]);
-    gsap.set(back, { clipPath: s.clip, x: 0, y: 0, scale: 1, opacity: 1, borderRadius: 0, zIndex: 2 });
-    gsap.set(front, { zIndex: 1 });
-    gsap.to(front, { ...s.out, scale: 0.8, opacity: 0.4, duration: d, ease: 'pageTransition', force3D: true });
-    gsap.to(back, { clipPath: 'inset(0% 0% 0% 0%)', duration: d, ease: 'pageTransition', force3D: true,
-      onComplete: () => { gsap.set(front, { opacity: 0, x: 0, y: 0, scale: 1 }); } });
+  if (spec.kind === 'crna') {                            // the r25 move in pure CSS: incoming clip-reveals
+    const s = CRNA[pulseSide++ % CRNA.length];           // on top, outgoing pulls back 30% + scale .8 + fade
+    const tx = s.out.x || '0', ty = s.out.y || '0';
+    back.style.transition = 'none'; back.style.zIndex = '2'; back.style.opacity = '1'; back.style.transform = 'none'; back.style.borderRadius = '0'; back.style.clipPath = s.clip;
+    front.style.transition = 'none'; front.style.zIndex = '1'; front.style.opacity = '1'; front.style.transform = 'none'; front.style.borderRadius = '0'; front.style.clipPath = 'inset(0% 0% 0% 0%)';
+    void back.offsetWidth;
+    back.style.transition = `clip-path ${dur}ms ${CRNA_EASE}`;
+    back.style.clipPath = 'inset(0% 0% 0% 0%)';
+    front.style.transition = `transform ${dur}ms ${CRNA_EASE}, opacity ${dur}ms ${CRNA_EASE}`;
+    front.style.transform = `translate(${tx}, ${ty}) scale(0.8)`; front.style.opacity = '0.4';
     el._front = bk;
+    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0% 0% 0% 0%)'; front.style.zIndex = '0'; back.style.zIndex = '1'; }, dur + 40);
     return;
   }
   if (spec.kind === 'fold') {                            // the silent-house fold: new image sits full

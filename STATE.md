@@ -175,11 +175,14 @@ cells.
    conductor vs. free-tempo).
 4. **Transition** — DECIDED (2026-06-16): the **R25 crna four-side pull-back**
    (`landmark-01-the-door` / R25 `comps/solo/`) is THE transition. Ported verbatim
-   into orchestra PULSE as `kind: 'crna'` — uses GSAP + the `pageTransition` CustomEase:
+   into orchestra PULSE as `kind: 'crna'` — pure CSS (clip-path + transform/opacity
+   transitions, ease `cubic-bezier(.45,.05,.2,1)` ≈ the `pageTransition` CustomEase):
    incoming clip-reveals from an edge on top while the outgoing pulls back 30% + scale
-   .8 + opacity .4, 0.7s, cycling all four sides. (Earlier fold/pull attempts kept in
-   code as alternates `kind: 'fold'`/`'pull'` but NOT used.) `landmark-03-fold-ribbon`
-   is kept as a reference but is not the chosen transition.
+   .8 + opacity .4, 0.7s (capped to <1 beat), cycling all four sides. NOTE: tried GSAP
+   first (r49) to match the ease exactly — it would NOT tween clip-path reliably here
+   and fought the CSS transitions the other voices use, leaving layers stuck at their
+   start clips. CSS-only fixed it. Earlier fold/pull attempts kept as unused alternates
+   (`kind: 'fold'`/`'pull'`). `landmark-03-fold-ribbon` kept as reference, not chosen.
 5. **Drawer / nav** — wire real destinations into the mark-as-door drawer
    (`landmark-01`).
 6. Carry-overs from SPEC: shareable `?seed=` permutation URL; what the "hourly
