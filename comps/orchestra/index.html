@@ -108,7 +108,7 @@
 <div id="overlay">
   <div class="wordmark">ORCHESTRA</div>
   <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns an
-  image block and changes it with its own transition — PULSE the crna pull, groans a slow zoom,
+  image block and changes it with its own transition — PULSE the fold, groans a slow zoom,
   drive a wipe, tick a hard cut — while the grid reshapes with the music and the IAAH mark keeps time.
   switch modes up top; L toggles labels; drag the tempo. sound on.</div>
   <div class="prompt">tap to enter</div>
@@ -204,8 +204,8 @@ function popFlash(el, peak, decay, color) {
   fl.style.transition = 'none'; fl.style.opacity = peak; void fl.offsetWidth;
   fl.style.transition = 'opacity ' + decay + 'ms cubic-bezier(.2,.6,.2,1)'; fl.style.opacity = '0';
 }
-function doTransition(el, spec) {
-  const u = nextImg(); if (!u) return;
+function doTransition(el, spec, url) {
+  const u = url || nextImg(); if (!u) return;
   const myTxn = el._txn = (el._txn || 0) + 1;            // invalidates any pending cleanup
   const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
   back.src = u;
@@ -315,7 +315,7 @@ const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
 const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
 // kind = transition verb, dur ms, swap = min beats between cuts, flash = pop opacity, tint = pop colour
 const VSPEC = {
-  pulse:   { kind: 'crna',     dur: 620,  swap: 1, flash: 0 },     // the lead — the r25 four-side pull-back
+  pulse:   { kind: 'fold',     dur: 680,  swap: 1, flash: 0 },     // the lead — the silent-house fold (shared by subdivide + repack)
   groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
   groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
   shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.26 },
@@ -336,7 +336,11 @@ function fire(vname, n, t, audioFn) {
     const el = cells[area];
     if (el.style.display === 'none' || el._packHidden || el._rotating) return;   // hidden / mid-relocation
     if (el._veil && el._veil.style.opacity === '1') return;    // blacked-out (negative-space) tile
-    if (mode === 'repack') { if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; } return; }   // crossfade an AR-matched image in place
+    if (mode === 'repack') {                                  // lead (pulse) FOLDS; the rest crossfade in place
+      if (vname === 'pulse') { if (n - el._lastSwap >= 2) { doTransition(el, VSPEC.pulse, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }
+      else if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; }
+      return;
+    }
     if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; }
     else if (spec.flash) popFlash(el, spec.flash, 260, '#fff');
   }, Math.max(0, (t - ctx.currentTime) * 1000));
@@ -396,8 +400,9 @@ function hideRepack(el, instant) {
 }
 function setRect(el, r) {
   el.style.transition = 'none';                        // positions NEVER animate — images appear by fading, not sliding
-  el.style.left = ((r.x + r.w * GUT / 2) * 100) + '%'; el.style.top = ((r.y + r.h * GUT / 2) * 100) + '%';
-  el.style.width = (r.w * (1 - GUT) * 100) + '%'; el.style.height = (r.h * (1 - GUT) * 100) + '%';   // shrink each box by GUT of its own size → gap, exact AR
+  const g = (r.w >= 0.999 && r.h >= 0.999) ? 0 : GUT;  // full-screen tile → full bleed (no gutter)
+  el.style.left = ((r.x + r.w * g / 2) * 100) + '%'; el.style.top = ((r.y + r.h * g / 2) * 100) + '%';
+  el.style.width = (r.w * (1 - g) * 100) + '%'; el.style.height = (r.h * (1 - g) * 100) + '%';   // shrink each box by GUT of its own size → gap, exact AR
   void el.offsetWidth;
 }
 // fresh scaffold: each tile picks an image and is sized to that image's native AR
@@ -439,7 +444,8 @@ function showCell(el, tile, instant) {
 function buildAndPlace(instant) {
   const voices = activeVoiceList(); VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });
   const lit = Math.min(voices.length, CELL_IDS.length);
-  scaffold = buildScaffold(lit, lit <= 2 ? 1 : 2);     // a couple spare tiles to relocate into
+  if (lit === 1) scaffold = [{ rect: { x: 0, y: 0, w: 1, h: 1 }, url: nextImgForAR(innerWidth / innerHeight) }];   // single beat → ONE full-screen image (folds on the beat)
+  else scaffold = buildScaffold(lit, lit <= 2 ? 1 : 2);     // a couple spare tiles to relocate into
   const n = Math.min(lit, scaffold.length); slotByVoice = {}; const active = new Set();
   for (let i = 0; i < n; i++) { const v = voices[i]; slotByVoice[v] = i; active.add(binding[v]); showCell(cells[binding[v]], scaffold[i], instant); }
   CELL_IDS.forEach((id) => { if (!active.has(id)) hideRepack(cells[id], instant); });
