@@ -1,6 +1,6 @@
 # UNIQLOCK V2 — STATE
 
-*Living status doc — last updated 2026-06-15. Companion to [SPEC.md](SPEC.md):
+*Living status doc — last updated 2026-06-16 (build r50-crna-css). Companion to [SPEC.md](SPEC.md):
 SPEC is the design-time intent; STATE is where the build actually is. When they
 disagree, STATE wins (and note the divergence here).*
 
@@ -16,7 +16,13 @@ not yet assembled — we're still choosing the sound, the transition, and the
 core mechanic before wiring the final thing.
 
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
-region of the screen. First probe shipped (Strata on a grayscale block grid).
+region of the screen.
+
+**Current build:** `r50-crna-css` (commit `ec3f6ca`, 2026-06-16) — the orchestra
+on Strata imagery, with the **R25 crna four-side pull-back** as PULSE's transition
+(pure CSS, GSAP removed — see Open decisions #4), the IAAH metronome box keeping
+time, three modes (subdivide / repack / breathe), tempo fader, accent + warm-black
+design pass. SUBDIVIDE layouts vary by tempo (PULSE not always the hero).
 
 **Live:**
 - Slate / all comps → https://nessim-higson.github.io/uniqlock-v2/comps/
@@ -65,7 +71,7 @@ Newest first. All under `comps/`, served at port 4191, listed on the slate page.
 
 | # | Comp | What it is | Standing |
 |---|---|---|---|
-| 20 | **orchestra** | Sound+image: each voice of a track lights a grid block | **Active direction** ([landmark-02](versions/landmark-02-orchestra/)) |
+| 20 | **orchestra** | Sound+image: each voice changes a grid block, R25 crna on PULSE | **Active direction** — current `r50-crna-css` (`landmark-02` is the early probe) |
 | 19 | **sound** | Generative audio sampler — ARC + 3 Tectonic forks | Active (the sound lab) |
 | 18 | fold | Silent-house 4-side 3D hinge transition | Kept |
 | 17 | tempo | You hold the metronome; work changes per beat; crna 4-side pull transition | **Favored transition** |
@@ -121,17 +127,23 @@ each **voice** of a track owns a **region**, and that region reacts when its
 voice plays. Because our music is generative, we know exactly which voice fires
 when (sample-accurate, ahead of time) — no FFT guessing.
 
-**`comps/orchestra/` (probe 01 — Strata, color = grayscale blocks):**
-- Gapless, square-cornered, **responsive** grid (desktop / tablet / mobile, via
-  `grid-template-areas` per breakpoint). Six blocks rest at dark→light greys.
-- Strata's 5 voices each flash a block when they sound (visual scheduled at the
-  audio event time): PULSE (every beat, center), GROAN A/B (slow swells), SHIMMER
-  (bright bar accent), DRIVE (off-beats), TICK (fast top-strip).
+**`comps/orchestra/` (Orchestra 01 — Strata, on IAAH imagery) — current at r50:**
+- Gapless, square-cornered, **responsive** grid, JS-driven placement (six blocks,
+  each an IAAH image cell with a two-layer crossfade from the imagery manifest).
+- Strata's 6 voices each change their block when they sound, each with its own
+  transition: **PULSE = the R25 crna four-side pull-back** (the chosen hero
+  transition); GROANS = slow zoom; SHIMMER = dissolve; DRIVE = wipe; TICK = hard
+  cut. Visuals scheduled at the audio event time.
+- **Three modes** (chips / keys 1-3): SUBDIVIDE (layout count + composition vary
+  by tempo, PULSE not always hero), REPACK (recomposes each section), BREATHE
+  (seams swell on the beat). `L` toggles instrument labels.
 - **BPM fills the grid in** — at 60 only PULSE is alive; crossing 74/88/102/116
-  lights the rest (the Tectonic tier gate, made visual).
-- **Section reassignment ON** — every 8 bars the voice→block binding rotates one
-  step (a verified permutation); PULSE walks all six blocks over time, so the
-  composition keeps recomposing.
+  brings in the other voices (the Tectonic tier gate, made visual).
+- **Section reassignment** — every 8 bars the voice→block binding rotates; the
+  visible blocks are always the live voices' blocks (so nothing freezes).
+- IAAH metronome box keeps time; warm-black + IAAH-yellow accent; reduced-motion
+  + focus-visible a11y. A per-cell transaction token guards transition cleanup so
+  a stale cleanup can't freeze a block.
 
 **Built as an engine, not a one-off:** a track exposes named voice-events; a
 mapping binds event-names → regions → block behaviors. So the planned **suite**
