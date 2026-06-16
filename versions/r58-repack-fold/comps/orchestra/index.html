@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>COMP 20 — orchestra</title>
+<style>
+  @font-face { font-family: "Uniqlo"; src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff"); font-weight: 700; font-display: swap; }
+  :root { --accent: #ffd23e; --black: #0a0a0a; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--black);
+    font-family: "Helvetica Neue", Helvetica, sans-serif; color: #fff; }
+  ::selection { background: var(--accent); color: #1a1500; }
+
+  #grid { position: absolute; inset: 0; display: grid; gap: 0; }
+  #grid.pack { display: block; }
+  #grid.pack .cell { position: absolute; }
+  .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #141416; perspective: 1100px; }
+  .cell .inner { position: absolute; inset: 0; transform-origin: center; will-change: transform; }
+  .cell .veil { position: absolute; inset: 0; background: var(--black); opacity: 0; z-index: 4; pointer-events: none; transition: opacity .6s ease; }
+  .cell .ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    opacity: 0; clip-path: inset(0 0 0 0); transform-origin: center; backface-visibility: hidden; }
+  .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; }
+  .lab { position: absolute; left: 8px; top: 7px; z-index: 5; font-size: 11px; letter-spacing: 0.08em;
+    font-weight: 500; color: #fff; background: rgba(0,0,0,0.42); padding: 2px 6px; border-radius: 3px;
+    display: none; pointer-events: none; }
+  #grid.labels .lab { display: inline-block; }
+
+  /* the IAAH mark, as the metronome — a white box that snaps 90° on every beat */
+  #metro { position: fixed; left: 3vmin; top: 3vmin; z-index: 6; width: 6vmin; height: 6vmin;
+    min-width: 46px; min-height: 46px; background: #fff; display: flex; align-items: center;
+    justify-content: center; cursor: pointer; transition: transform 220ms cubic-bezier(.3,0,.15,1); }
+  #metro span { font-weight: 700; font-size: 1.55vmin; letter-spacing: 0.06em; color: #111; }
+
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
+    font-size: 11px; letter-spacing: 0.14em; font-variant-numeric: tabular-nums; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 7; color: #fff; mix-blend-mode: difference;
+    font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+
+  #modes { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 8;
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; max-width: 92vw;
+    background: rgba(10,10,10,0.5); backdrop-filter: blur(6px); padding: 6px;
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 20px; }
+  .chip { font-size: 11px; letter-spacing: 0.08em; color: #fff; opacity: 0.5; padding: 5px 10px;
+    border-radius: 14px; cursor: pointer; user-select: none; white-space: nowrap; transition: opacity 150ms, background 150ms, color 150ms; }
+  .chip:hover { opacity: 0.85; }
+  .chip.on { opacity: 1; background: rgba(255,255,255,0.14); color: var(--accent); }
+  .chip.sep { opacity: 0.25; pointer-events: none; padding: 5px 2px; color: #fff; }
+
+  #transport { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 8;
+    display: flex; align-items: center; gap: 16px; background: rgba(10,10,10,0.35); backdrop-filter: blur(6px);
+    padding: 10px 16px; border: 1px solid rgba(255,255,255,0.16); border-radius: 30px; }
+  .btn { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.4);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 13px;
+    flex: none; transition: background 160ms, color 160ms; }
+  .btn:hover { background: #fff; color: #111; }
+  #fader { position: relative; width: 40vw; max-width: 320px; height: 28px; cursor: pointer; touch-action: none; }
+  #fader .track { position: absolute; top: 50%; left: 0; right: 0; height: 2px; margin-top: -1px; background: rgba(255,255,255,0.25); }
+  #fader .knob { position: absolute; top: 50%; width: 11px; height: 22px; border-radius: 3px; background: var(--accent); transform: translate(-50%,-50%); }
+  #bpmlab { font-size: 12px; opacity: 0.7; font-variant-numeric: tabular-nums; letter-spacing: 0.08em; min-width: 7ch; }
+
+  .chip:focus-visible, .btn:focus-visible, #fader:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2.4vmin; background: var(--black); cursor: pointer;
+    transition: opacity 500ms ease; padding: 6vw; text-align: center; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-family: "Uniqlo", "Helvetica Neue", sans-serif; font-size: 8vmin; font-weight: 700; letter-spacing: 0.12em; }
+  #overlay .prompt { font-size: 2.2vmin; opacity: 0.55; letter-spacing: 0.06em; line-height: 1.7; max-width: 62ch; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cell .ph, #bigclock, #grid { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="grid" class="labels">
+  <div class="cell" id="c-pulse"><span class="lab"></span></div>
+  <div class="cell" id="c-ga"><span class="lab"></span></div>
+  <div class="cell" id="c-gb"><span class="lab"></span></div>
+  <div class="cell" id="c-shim"><span class="lab"></span></div>
+  <div class="cell" id="c-drive"><span class="lab"></span></div>
+  <div class="cell" id="c-tick"><span class="lab"></span></div>
+</div>
+
+<div id="metro"><span>IAAH</span></div>
+
+<div id="modes">
+  <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
+  <div class="chip on" data-mode="repack">REPACK</div>
+  <div class="chip sep">·</div>
+  <div class="chip on" id="labelChip">LABELS</div>
+</div>
+
+<div id="status">ORCHESTRA · STRATA</div>
+<div id="label">COMP 20 — ORCHESTRA · <a href="../">back</a></div>
+<div id="transport">
+  <div id="play" class="btn">❚❚</div>
+  <div id="fader"><div class="track"></div><div class="knob"></div></div>
+  <div id="bpmlab">104 BPM</div>
+</div>
+
+<div id="overlay">
+  <div class="wordmark">ORCHESTRA</div>
+  <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns an
+  image block and changes it with its own transition — PULSE the fold, groans a slow zoom,
+  drive a wipe, tick a hard cut — while the grid reshapes with the music and the IAAH mark keeps time.
+  switch modes up top; L toggles labels; drag the tempo. sound on.</div>
+  <div class="prompt">tap to enter</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import { loadImageryManifest } from '../../js/data.js';
+
+// a close approximation of r25's GSAP 'pageTransition' CustomEase
+const CRNA_EASE = 'cubic-bezier(.45,.05,.2,1)';
+// the r25 crna move: incoming reveals via clip-path from an edge while the
+// outgoing pulls back + away + fades, cycling all four sides.
+const CRNA = [
+  { clip: 'inset(100% 0% 0% 0%)', out: { y: '-30%' } }, // reveal from BOTTOM, old lifts up
+  { clip: 'inset(0% 0% 100% 0%)', out: { y: '30%' } },  // reveal from TOP, old drops down
+  { clip: 'inset(0% 100% 0% 0%)', out: { x: '30%' } },  // reveal from LEFT, old slides right
+  { clip: 'inset(0% 0% 0% 100%)', out: { x: '-30%' } }, // reveal from RIGHT, old slides left
+];
+
+const RM = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const playBtn = document.getElementById('play');
+const fader = document.getElementById('fader');
+const knob = document.querySelector('#fader .knob');
+const bpmlab = document.getElementById('bpmlab');
+const statusEl = document.getElementById('status');
+const overlay = document.getElementById('overlay');
+const grid = document.getElementById('grid');
+const metro = document.getElementById('metro');
+
+let ctx, master, bus, space, noiseBuf;
+let bpm = 104, phase = 0, beatN = 0, lastT = 0, running = true, entered = false;
+const BPM_MIN = 60, BPM_MAX = 130;
+
+// ── shared instruments (same engine as the sound comp) ──
+function makeIR(sec) { const len = ctx.sampleRate * sec, b = ctx.createBuffer(2, len, ctx.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.2); } return b; }
+function voice(o) {
+  const osc = ctx.createOscillator(); osc.type = o.type || 'sawtooth'; osc.frequency.value = o.freq; osc.detune.value = o.detune || 0;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + (o.atk || 0.01)); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  let tail = osc;
+  if (o.lp) { const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = o.lp; if (o.q) f.Q.value = o.q; osc.connect(f); tail = f; }
+  tail.connect(g); g.connect(o.dest || bus);
+  osc.start(o.t); osc.stop(o.t + o.dur + 0.05);
+}
+function noise(o) {
+  const s = ctx.createBufferSource(); s.buffer = noiseBuf;
+  const f = ctx.createBiquadFilter(); f.type = o.ftype || 'highpass'; f.frequency.value = o.freq || 6000; if (o.q) f.Q.value = o.q;
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, o.t); g.gain.linearRampToValueAtTime(o.gain, o.t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, o.t + o.dur);
+  s.connect(f); f.connect(g); g.connect(o.dest || bus); s.start(o.t); s.stop(o.t + o.dur + 0.05);
+  if (o.sweep) f.frequency.exponentialRampToValueAtTime(o.sweep, o.t + o.dur);
+}
+const D = { d2: 73.42, f2: 87.31, a4: 440 };
+function subThud(t, f0, f1, dur, gain) {
+  const o = ctx.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + 0.09);
+  const o2 = ctx.createOscillator(); o2.type = 'triangle';
+  o2.frequency.setValueAtTime(f0 * 2, t); o2.frequency.exponentialRampToValueAtTime(Math.max(24, f1 * 2), t + 0.09);
+  const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(gain, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const g2 = ctx.createGain(); g2.gain.value = 0.12;
+  o.connect(g); o2.connect(g2); g2.connect(g); g.connect(master);
+  o.start(t); o.stop(t + dur + 0.05); o2.start(t); o2.stop(t + dur + 0.05);
+}
+
+// ── imagery pool ──
+let pool = [], queue = [];
+const arMap = {};   // url → native aspect ratio (w/h), captured on preload so REPACK can keep each image's own AR
+function nextImg() { if (!pool.length) return ''; if (!queue.length) { queue = [...pool]; for (let i = queue.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [queue[i], queue[j]] = [queue[j], queue[i]]; } } return queue.pop(); }
+const manifestReady = loadImageryManifest().then((p) => { pool = p; pool.forEach((u) => { const im = new Image(); im.onload = () => { if (im.naturalHeight) arMap[u] = im.naturalWidth / im.naturalHeight; }; im.src = u; }); return p; }).catch(() => { pool = []; });
+
+// ── the grid model ──
+const cells = { pulse: document.getElementById('c-pulse'), ga: document.getElementById('c-ga'), gb: document.getElementById('c-gb'), shim: document.getElementById('c-shim'), drive: document.getElementById('c-drive'), tick: document.getElementById('c-tick') };
+const CELL_IDS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
+CELL_IDS.forEach((id) => {
+  const el = cells[id];
+  const inner = document.createElement('div'); inner.className = 'inner';
+  const a = document.createElement('img'); a.className = 'ph'; a.decoding = 'async';
+  const b = document.createElement('img'); b.className = 'ph'; b.decoding = 'async';
+  const fl = document.createElement('div'); fl.className = 'flash';
+  inner.append(a, b, fl);
+  const veil = document.createElement('div'); veil.className = 'veil';
+  el.append(inner, veil);
+  el._layers = [a, b]; el._front = 0; el._flash = fl; el._lastSwap = -99; el._inner = inner; el._veil = veil; el._packHidden = false;
+});
+function initImages() { CELL_IDS.forEach((id) => { const el = cells[id]; if (!pool.length) return; el._layers[0].src = nextImg(); el._layers[0].style.opacity = '1'; }); }
+
+// per-voice image transitions — each instrument changes its block a different
+// way, so you can see the orchestration. PULSE uses the crna 4-side pull.
+const SIDES = ['up', 'left', 'down', 'right'];
+const EASE = 'cubic-bezier(.4,.05,.2,1)';
+let pulseSide = 0;
+function popFlash(el, peak, decay, color) {
+  const fl = el._flash;
+  fl.style.background = color || '#fff';
+  fl.style.transition = 'none'; fl.style.opacity = peak; void fl.offsetWidth;
+  fl.style.transition = 'opacity ' + decay + 'ms cubic-bezier(.2,.6,.2,1)'; fl.style.opacity = '0';
+}
+function doTransition(el, spec, url) {
+  const u = url || nextImg(); if (!u) return;
+  const myTxn = el._txn = (el._txn || 0) + 1;            // invalidates any pending cleanup
+  const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
+  back.src = u;
+  back.style.zIndex = '1'; front.style.zIndex = '0';
+  const beatMs = (60 / bpm) * 1000, dur = Math.max(80, Math.min(spec.dur, beatMs * 0.95));
+  if (RM || spec.kind === 'cut') {                       // instant cut (also the reduced-motion path)
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0';
+    void back.offsetWidth; front.style.opacity = '0'; el._front = bk; if (spec.kind === 'cut') popFlash(el, 0.22, 110); return;
+  }
+  if (spec.kind === 'crna') {                            // the r25 move in pure CSS: incoming clip-reveals
+    const s = CRNA[pulseSide++ % CRNA.length];           // on top, outgoing pulls back 30% + scale .8 + fade
+    const tx = s.out.x || '0', ty = s.out.y || '0';
+    back.style.transition = 'none'; back.style.zIndex = '2'; back.style.opacity = '1'; back.style.transform = 'none'; back.style.borderRadius = '0'; back.style.clipPath = s.clip;
+    front.style.transition = 'none'; front.style.zIndex = '1'; front.style.opacity = '1'; front.style.transform = 'none'; front.style.borderRadius = '0'; front.style.clipPath = 'inset(0% 0% 0% 0%)';
+    void back.offsetWidth;
+    back.style.transition = `clip-path ${dur}ms ${CRNA_EASE}`;
+    back.style.clipPath = 'inset(0% 0% 0% 0%)';
+    front.style.transition = `transform ${dur}ms ${CRNA_EASE}, opacity ${dur}ms ${CRNA_EASE}`;
+    front.style.transform = `translate(${tx}, ${ty}) scale(0.8)`; front.style.opacity = '0.4';
+    el._front = bk;
+    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0% 0% 0% 0%)'; front.style.zIndex = '0'; back.style.zIndex = '1'; }, dur + 40);
+    return;
+  }
+  if (spec.kind === 'fold') {                            // the silent-house fold: new image sits full
+    const side = SIDES[pulseSide++ % SIDES.length];      // behind, old image hinges back on a cycling edge
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0'; back.style.zIndex = '0'; back.style.transformOrigin = 'center';
+    front.style.zIndex = '1'; front.style.transition = 'none'; front.style.opacity = '1'; front.style.clipPath = 'inset(0 0 0 0)'; front.style.borderRadius = '0';
+    front.style.transformOrigin = side === 'up' ? 'top' : side === 'down' ? 'bottom' : side === 'left' ? 'left' : 'right';
+    front.style.transform = 'rotateX(0deg)';
+    void front.offsetWidth;
+    const rot = side === 'up' ? 'rotateX(-90deg)' : side === 'down' ? 'rotateX(90deg)' : side === 'left' ? 'rotateY(90deg)' : 'rotateY(-90deg)';
+    front.style.transition = `transform ${dur}ms ${EASE}`;
+    front.style.transform = rot;
+    el._front = bk;
+    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.transformOrigin = 'center'; front.style.opacity = '0'; front.style.zIndex = '0'; }, dur + 40);
+    return;
+  }
+  if (spec.kind === 'pull') {                            // the crna move: new image sits full BEHIND,
+    const side = SIDES[pulseSide++ % SIDES.length];      // old image pulls back + masks away on top
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0'; back.style.zIndex = '0';
+    front.style.zIndex = '1'; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '1'; front.style.borderRadius = '0'; front.style.clipPath = 'inset(0 0 0 0)';
+    void front.offsetWidth;
+    const sh = side === 'up' ? 'translateY(-20%)' : side === 'down' ? 'translateY(20%)' : side === 'left' ? 'translateX(-20%)' : 'translateX(20%)';
+    const clip = side === 'up' ? 'inset(100% 0 0 0)' : side === 'down' ? 'inset(0 0 100% 0)' : side === 'left' ? 'inset(0 0 0 100%)' : 'inset(0 100% 0 0)';
+    front.style.transition = `transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}, border-radius ${dur}ms ${EASE}, clip-path ${dur}ms ${EASE}`;
+    front.style.transform = sh + ' scale(.82)'; front.style.opacity = '.35'; front.style.borderRadius = '2.2vmin'; front.style.clipPath = clip;
+    el._front = bk;
+    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.borderRadius = '0'; front.style.clipPath = 'inset(0 0 0 0)'; front.style.zIndex = '0'; }, dur + 40);
+    return;
+  }
+  let kind = spec.kind, initClip = 'inset(0 0 0 0)', initT = 'none', initO = '1';
+  if (kind === 'wipe') initClip = 'inset(0 100% 0 0)';
+  else if (kind === 'scale') { initT = 'scale(1.16)'; initO = '0'; }
+  else if (kind === 'dissolve') initO = '0';
+  back.style.transition = 'none'; back.style.clipPath = initClip; back.style.transform = initT; back.style.opacity = initO;
+  void back.offsetWidth;
+  back.style.transition = `clip-path ${dur}ms ${EASE}, transform ${dur}ms ${EASE}, opacity ${dur}ms ${EASE}`;
+  back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1';
+  // the incoming reveals OVER a held outgoing — no recede, so no dark gap / flash
+  el._front = bk;
+  setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0 0 0 0)'; }, dur + 40);
+}
+
+// layouts: track sizes (fr) + per-cell placement {c,r,cs,rs}. portrait via transpose().
+const L = {
+  broadcast: { cols: [1, 2, 1], rows: [0.6, 1.6, 1.1], place: { tick: { c: 1, r: 1, cs: 3 }, ga: { c: 1, r: 2 }, pulse: { c: 2, r: 2 }, shim: { c: 3, r: 2 }, drive: { c: 1, r: 3, cs: 2 }, gb: { c: 3, r: 3 } } },
+  columns:   { cols: [1.6, 1, 1], rows: [1, 1, 1], place: { pulse: { c: 1, r: 1, rs: 3 }, tick: { c: 2, r: 1, cs: 2 }, ga: { c: 2, r: 2 }, shim: { c: 3, r: 2 }, drive: { c: 2, r: 3 }, gb: { c: 3, r: 3 } } },
+  stack:     { cols: [1, 1, 1], rows: [0.7, 1.6, 1], place: { tick: { c: 1, r: 1, cs: 3 }, ga: { c: 1, r: 2 }, pulse: { c: 2, r: 2 }, gb: { c: 3, r: 2 }, drive: { c: 1, r: 3, cs: 2 }, shim: { c: 3, r: 3 } } },
+  grid6:     { cols: [1, 1, 1], rows: [1, 1], place: { tick: { c: 1, r: 1 }, shim: { c: 2, r: 1 }, ga: { c: 3, r: 1 }, pulse: { c: 1, r: 2 }, drive: { c: 2, r: 2 }, gb: { c: 3, r: 2 } } },
+  big:       { cols: [1], rows: [1], place: { pulse: { c: 1, r: 1 } } },
+  l3:        { cols: [1, 1], rows: [1.4, 1], place: { pulse: { c: 1, r: 1, cs: 2 }, ga: { c: 1, r: 2 }, gb: { c: 2, r: 2 } } },
+  l4:        { cols: [1, 1], rows: [1, 1], place: { pulse: { c: 1, r: 1 }, ga: { c: 2, r: 1 }, gb: { c: 1, r: 2 }, shim: { c: 2, r: 2 } } },
+  l5:        { cols: [1, 1, 1], rows: [1, 1], place: { pulse: { c: 1, r: 1 }, ga: { c: 2, r: 1 }, gb: { c: 3, r: 1 }, shim: { c: 1, r: 2 }, drive: { c: 2, r: 2, cs: 2 } } },
+};
+function transpose(lay) {
+  const place = {};
+  for (const k in lay.place) { const p = lay.place[k]; place[k] = { c: p.r, r: p.c, cs: p.rs || 1, rs: p.cs || 1 }; }
+  return { cols: lay.rows, rows: lay.cols, place };
+}
+const isPortrait = () => innerHeight > innerWidth;
+
+let baseCols = [1], baseRows = [1], curPlace = {}, lastLayoutKey = '';
+function applyLayout(lay, key) {
+  if (key === lastLayoutKey) return;
+  lastLayoutKey = key;
+  const o = isPortrait() ? transpose(lay) : lay;
+  grid.style.transition = 'grid-template-columns .5s ease, grid-template-rows .5s ease';
+  grid.style.gridTemplateColumns = o.cols.map((f) => f + 'fr').join(' ');
+  grid.style.gridTemplateRows = o.rows.map((f) => f + 'fr').join(' ');
+  CELL_IDS.forEach((id) => {
+    const p = o.place[id], el = cells[id];
+    if (!p) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.style.gridColumn = p.c + ' / span ' + (p.cs || 1);
+    el.style.gridRow = p.r + ' / span ' + (p.rs || 1);
+  });
+  baseCols = [...o.cols]; baseRows = [...o.rows]; curPlace = o.place;
+}
+
+// BREATHE — TABLED (2026-06-16). Two attempts: global track-swell (distracting
+// jitter) and local image-scale (too inert). Neither landed; parked rather than
+// chase a third. The .inner layer it needed is left in place, harmless.
+
+// ── the voices, their flash/swap, and the rotating voice → block binding ──
+const AREAS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
+const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
+const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
+// kind = transition verb, dur ms, swap = min beats between cuts, flash = pop opacity, tint = pop colour
+const VSPEC = {
+  pulse:   { kind: 'fold',     dur: 680,  swap: 1, flash: 0 },     // the lead — the silent-house fold (shared by subdivide + repack)
+  groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
+  groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
+  shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.26 },
+  drive:   { kind: 'wipe',     dur: 240,  swap: 2, flash: 0.14 },
+  tick:    { kind: 'cut',      dur: 90,   swap: 2, flash: 0.20 },
+};
+const STRONG = new Set(['pulse', 'groanA', 'groanB']);
+const binding = {};
+VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });   // valid before the first beat
+let curSection = -1, beatFired = [];
+let mode = 'repack';
+
+function fire(vname, n, t, audioFn) {
+  audioFn();
+  const area = binding[vname], spec = VSPEC[vname];
+  beatFired.push({ area, strong: STRONG.has(vname) });
+  setTimeout(() => {
+    const el = cells[area];
+    if (el.style.display === 'none' || el._packHidden || el._rotating) return;   // hidden / mid-relocation
+    if (el._veil && el._veil.style.opacity === '1') return;    // blacked-out (negative-space) tile
+    if (mode === 'repack') {                                  // lead (pulse) FOLDS; the rest crossfade in place
+      if (vname === 'pulse') { if (n - el._lastSwap >= 2) { doTransition(el, VSPEC.pulse, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }
+      else if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; }
+      return;
+    }
+    if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; }
+    else if (spec.flash) popFlash(el, spec.flash, 260, '#fff');
+  }, Math.max(0, (t - ctx.currentTime) * 1000));
+}
+function relabel() {
+  const a2v = {}; VOICES.forEach((v) => { a2v[binding[v]] = v; });
+  CELL_IDS.forEach((id) => { cells[id].querySelector('.lab').textContent = a2v[id] ? NAME[a2v[id]] : ''; });
+}
+// which voices are sounding at this tempo (pulse is always live)
+function activeVoiceList() { const a = ['pulse']; if (bpm >= 74) a.push('groanA', 'groanB'); if (bpm >= 88) a.push('shimmer'); if (bpm >= 102) a.push('drive'); if (bpm >= 116) a.push('tick'); return a; }
+// subdivide is built from the live voices' current blocks (so every visible
+// block has a sounding voice — nothing freezes), but the composition varies
+// with tempo and the focal block isn't always PULSE. slots are filled in voice
+// order (pulse, groans, shimmer, drive, tick); at the lowest tempo only PULSE
+// is live so it fills the screen.
+const SUBTPL = {
+  1: { cols: [1], rows: [1], slots: [{ c: 1, r: 1 }] },
+  3: { cols: [1.3, 1], rows: [1, 1], slots: [{ c: 2, r: 1 }, { c: 1, r: 1, rs: 2 }, { c: 2, r: 2 }] },
+  4: { cols: [1, 1], rows: [1, 1], slots: [{ c: 1, r: 1 }, { c: 2, r: 1 }, { c: 1, r: 2 }, { c: 2, r: 2 }] },
+  5: { cols: [1, 2, 1], rows: [0.7, 1.6, 1.1], slots: [{ c: 1, r: 1, cs: 3 }, { c: 1, r: 2 }, { c: 2, r: 2 }, { c: 3, r: 2 }, { c: 1, r: 3, cs: 3 }] },
+  6: { cols: [1, 2, 1], rows: [0.6, 1.6, 1.1], slots: [{ c: 1, r: 1, cs: 3 }, { c: 1, r: 2 }, { c: 2, r: 2 }, { c: 3, r: 2 }, { c: 1, r: 3, cs: 2 }, { c: 3, r: 3 }] },
+};
+function buildSubdivide() {
+  const voices = activeVoiceList(), tpl = SUBTPL[voices.length] || SUBTPL[6], place = {};
+  voices.forEach((v, i) => { const s = tpl.slots[i]; if (s) place[binding[v]] = { c: s.c, r: s.r, cs: s.cs || 1, rs: s.rs || 1 }; });
+  return { cols: tpl.cols, rows: tpl.rows, place };
+}
+
+let packSeed = 20260616 >>> 0;
+function rng() { packSeed = (packSeed * 1664525 + 1013904223) >>> 0; return packSeed / 4294967296; }
+
+// ── REPACK — r52 collage bones: a fixed module-grid scaffold of tiles, big black
+// negative space, images that APPEAR in different places by fading (never
+// sliding). two changes from r52: (1) each tile is sized to its image's native
+// AR, so very little gets cropped; (2) tempo scales tile SIZE — pull back toward
+// a single beat and the imagery gets larger.
+let GC = 16, GR = 10;
+const GUT = 0.05;                                       // proportional shrink (5%) → black gaps, AR preserved exactly
+const REPACK_PERIOD = 4;                                // relocate one image every bar
+let scaffold = [], slotByVoice = {}, lastTierCount = -1, repackBar = -1, recentImg = [];
+function setLayerImg(lay, url) { lay.onload = () => { if (lay.naturalHeight && arMap[url] === undefined) arMap[url] = lay.naturalWidth / lay.naturalHeight; }; lay.src = url; }
+// pick an image whose native AR is close to a target (so cover barely crops),
+// avoiding the most-recent few.
+function nextImgForAR(targetAR) {
+  if (!pool.length) return '';
+  let best = null, bestD = Infinity;
+  for (let k = 0; k < 7; k++) { const u = pool[Math.floor(rng() * pool.length)]; if (recentImg.includes(u)) continue; const d = Math.abs(Math.log((arMap[u] || 1.4) / targetAR)); if (d < bestD) { bestD = d; best = u; } }
+  if (!best) best = pool[Math.floor(rng() * pool.length)];
+  recentImg.push(best); if (recentImg.length > 10) recentImg.shift();
+  return best;
+}
+function hideRepack(el, instant) {
+  el._veil.style.opacity = '0'; el._packHidden = true; el._rotating = false;
+  if (instant) { el.style.display = 'none'; el.style.opacity = '0'; return; }
+  el.style.transition = 'opacity .45s ease'; el.style.opacity = '0';
+  setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 460);
+}
+function setRect(el, r) {
+  el.style.transition = 'none';                        // positions NEVER animate — images appear by fading, not sliding
+  const g = (r.w >= 0.999 && r.h >= 0.999) ? 0 : GUT;  // full-screen tile → full bleed (no gutter)
+  el.style.left = ((r.x + r.w * g / 2) * 100) + '%'; el.style.top = ((r.y + r.h * g / 2) * 100) + '%';
+  el.style.width = (r.w * (1 - g) * 100) + '%'; el.style.height = (r.h * (1 - g) * 100) + '%';   // shrink each box by GUT of its own size → gap, exact AR
+  void el.offsetWidth;
+}
+// fresh scaffold: each tile picks an image and is sized to that image's native AR
+// (so it isn't cropped), at a target AREA set by tempo — fewer lit ⇒ bigger.
+function buildScaffold(lit, spares) {
+  const portrait = innerHeight > innerWidth;
+  GC = portrait ? 13 : 20; GR = portrait ? 20 : 13;
+  const total = GC * GR, cellR = (innerWidth / GC) / (innerHeight / GR);   // pixel AR of one grid cell
+  const occ = Array.from({ length: GR }, () => new Array(GC).fill(false));
+  const want = lit + spares;
+  const baseA = Math.min(total * 0.66, Math.max(20, total * 0.6 / Math.max(1, lit)));   // bigger area when fewer are lit
+  const tiles = []; let tries = 0;
+  while (tiles.length < want && tries < 600) {
+    tries++;
+    const u = nextImgForAR(0.6 + rng() * 1.4), a = arMap[u] || 1.4;        // an image + its native AR
+    const A = baseA * (0.72 + rng() * 0.56);                               // jittered target area (cells)
+    let th = Math.round(Math.sqrt(A * cellR / a)), tw = Math.round(th * a / cellR);
+    th = Math.max(2, Math.min(GR, th)); tw = Math.max(2, Math.min(GC, tw));
+    let bestErr = Infinity, bw = tw, bh = th;                              // snap to the integer cell-dims whose AR is closest to the image's
+    for (let dh = -1; dh <= 1; dh++) for (let dw = -1; dw <= 1; dw++) { const H2 = th + dh, W2 = tw + dw; if (H2 < 2 || W2 < 2 || H2 > GR || W2 > GC) continue; const err = Math.abs(Math.log((W2 / H2) * cellR / a)); if (err < bestErr) { bestErr = err; bw = W2; bh = H2; } }
+    tw = bw; th = bh;
+    const cx = Math.floor(rng() * (GC - tw + 1)), cy = Math.floor(rng() * (GR - th + 1));
+    let free = true;
+    for (let y = cy; y < cy + th && free; y++) for (let x = cx; x < cx + tw; x++) { if (occ[y][x]) { free = false; break; } }
+    if (!free) continue;
+    for (let y = cy; y < cy + th; y++) for (let x = cx; x < cx + tw; x++) occ[y][x] = true;
+    tiles.push({ rect: { x: cx / GC, y: cy / GR, w: tw / GC, h: th / GR }, url: u });
+  }
+  tiles.sort((p, q) => q.rect.w * q.rect.h - p.rect.w * p.rect.h);          // biggest first → hierarchy
+  return tiles;
+}
+function showCell(el, tile, instant) {
+  el.style.display = ''; setRect(el, tile.rect); el._veil.style.opacity = '0'; el._rotating = false;
+  const lay = el._layers[el._front]; setLayerImg(lay, tile.url); lay.style.opacity = '1'; el._layers[1 - el._front].style.opacity = '0';
+  if (instant) { el.style.transition = 'none'; el.style.opacity = '1'; }
+  else { el.style.opacity = '0'; void el.offsetWidth; el.style.transition = 'opacity .5s ease'; el.style.opacity = '1'; }
+  el._packHidden = false;
+}
+function buildAndPlace(instant) {
+  const voices = activeVoiceList(); VOICES.forEach((v, i) => { binding[v] = AREAS[i]; });
+  const lit = Math.min(voices.length, CELL_IDS.length);
+  if (lit === 1) scaffold = [{ rect: { x: 0, y: 0, w: 1, h: 1 }, url: nextImgForAR(innerWidth / innerHeight) }];   // single beat → ONE full-screen image (folds on the beat)
+  else scaffold = buildScaffold(lit, lit <= 2 ? 1 : 2);     // a couple spare tiles to relocate into
+  const n = Math.min(lit, scaffold.length); slotByVoice = {}; const active = new Set();
+  for (let i = 0; i < n; i++) { const v = voices[i]; slotByVoice[v] = i; active.add(binding[v]); showCell(cells[binding[v]], scaffold[i], instant); }
+  CELL_IDS.forEach((id) => { if (!active.has(id)) hideRepack(cells[id], instant); });
+}
+// relocate one lit image to a free tile — fade out here, reappear over there
+function rotateRepack() {
+  if (activeVoiceList().length <= 2) return;            // near a single beat: keep it big and calm — no hopping
+  const occupied = new Set(Object.values(slotByVoice));
+  const free = []; for (let i = 0; i < scaffold.length; i++) if (!occupied.has(i)) free.push(i);
+  if (!free.length) return;
+  const vs = Object.keys(slotByVoice); if (!vs.length) return;
+  const v = vs[Math.floor(rng() * vs.length)], el = cells[binding[v]], newSlot = free[Math.floor(rng() * free.length)];
+  slotByVoice[v] = newSlot; el._rotating = true;
+  el.style.transition = 'opacity .42s ease'; el.style.opacity = '0';
+  setTimeout(() => {
+    if (mode !== 'repack') { el._rotating = false; return; }
+    setRect(el, scaffold[newSlot].rect);
+    const ar = el.offsetWidth / Math.max(1, el.offsetHeight), u = nextImgForAR(ar);
+    if (u) { scaffold[newSlot].url = u; setLayerImg(el._layers[el._front], u); }
+    el.style.transition = 'opacity .5s ease'; el.style.opacity = '1'; el._rotating = false;
+  }, 440);
+}
+// a per-voice swap in repack: crossfade a lit tile to an AR-matched image in place
+// (no motion). fires on each beat — at a single beat the lone big image changes on it.
+function repackSwap(el) {
+  const ar = el.offsetWidth / Math.max(1, el.offsetHeight), u = nextImgForAR(ar); if (!u) return;
+  const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
+  back.style.transition = 'none'; back.style.transform = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.opacity = '0'; setLayerImg(back, u); void back.offsetWidth;
+  back.style.transition = 'opacity .5s ease'; back.style.opacity = '1'; el._front = bk;
+  setTimeout(() => { if (el._front === bk) front.style.opacity = '0'; }, 520);
+}
+function stepRepack(instant) {
+  if (instant) { lastTierCount = activeVoiceList().length; repackBar = Math.floor(beatN / REPACK_PERIOD); buildAndPlace(true); return; }
+  const live = activeVoiceList().length;
+  if (live !== lastTierCount) { lastTierCount = live; repackBar = Math.floor((beatN - 1) / REPACK_PERIOD); buildAndPlace(false); return; }   // tempo crossed a tier → new layout (resizes the imagery)
+  const bar = Math.floor((beatN - 1) / REPACK_PERIOD);
+  if (bar !== repackBar) { repackBar = bar; rotateRepack(); }
+}
+
+// SUBDIVIDE in/out: keep the favored tiled layout, but let cells fade to BLACK
+// and back — images come in and out, and black areas open up in the grid.
+let subVeiled = new Set();
+function subdivideInOut() {
+  if (beatN % 4 !== 1) return;                          // once a bar
+  [...subVeiled].forEach((id) => { if (cells[id].style.display === 'none') { cells[id]._veil.style.opacity = '0'; subVeiled.delete(id); } });
+  const cand = activeVoiceList().filter((v) => v !== 'pulse').map((v) => binding[v]);
+  if (!cand.length) return;
+  const id = cand[Math.floor(rng() * cand.length)], el = cells[id];
+  if (el.style.display === 'none') return;
+  if (subVeiled.has(id)) { el._veil.style.opacity = '0'; subVeiled.delete(id); }   // bring image back in
+  else if (rng() < 0.5) { el._veil.style.opacity = '1'; subVeiled.add(id); }       // open black
+}
+
+function applyModeLayout() {
+  const sec = Math.max(0, curSection);
+  if (mode === 'subdivide') applyLayout(buildSubdivide(), 'sub' + activeVoiceList().length + '-' + sec);
+}
+
+function beat(n, t) {
+  const s = 60 / bpm;
+  const L1 = bpm >= 74, L2 = bpm >= 88, L3 = bpm >= 102, L4 = bpm >= 116;
+  const section = Math.floor((n - 1) / 32);
+  if (section !== curSection) { curSection = section; if (mode !== 'repack') VOICES.forEach((v, i) => { binding[v] = AREAS[(i + section) % AREAS.length]; }); relabel(); }
+
+  fire('pulse', n, t, () => subThud(t, 50, 30, s * 1.8, 0.72));
+  if (L1 && n % 8 === 0) fire('groanA', n, t, () => voice({ type: 'sawtooth', freq: D.d2, detune: -6, t, atk: 1.6, dur: s * 9, gain: 0.06, lp: 260, q: 2, dest: bus }));
+  if (L1 && n % 8 === 4) fire('groanB', n, t, () => voice({ type: 'sawtooth', freq: D.f2, detune: 5, t, atk: 1.6, dur: s * 7, gain: 0.05, lp: 240, dest: bus }));
+  if (L2 && n % 4 === 3) fire('shimmer', n, t, () => voice({ type: 'sine', freq: D.a4 * 1.5, t, atk: 0.05, dur: s * 4, gain: 0.035, dest: bus }));
+  if (L3 && n % 2 === 1) fire('drive', n, t, () => subThud(t, 46, 40, s * 0.85, 0.32));
+  if (L4 && n % 2 === 0) fire('tick', n, t, () => noise({ ftype: 'bandpass', freq: 6500, q: 1.4, t, dur: 0.03, gain: 0.05, dest: bus }));
+}
+
+let metroDeg = 0;
+function onBeat() {
+  beatN++; beatFired = [];
+  if (ctx) beat(beatN, ctx.currentTime);
+  if (mode === 'repack') {
+    stepRepack(false);                                   // swap any due slots → relayout + morph
+  } else {
+    applyModeLayout();
+    if (mode === 'subdivide') subdivideInOut();
+  }
+  if (!RM) { metroDeg += 90; metro.style.transform = 'rotate(' + metroDeg + 'deg)'; }  // the mark keeps time
+  statusEl.textContent = 'ORCHESTRA · STRATA · ' + mode.toUpperCase() + ' · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
+}
+function loop(t) {
+  if (entered && running) { const dt = Math.min((t - lastT) / 1000, 0.25); phase += dt / (60 / bpm); while (phase >= beatN + 1) onBeat(); }
+  lastT = t;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ── controls ──
+function setMode(m) {
+  mode = m; lastLayoutKey = '';
+  CELL_IDS.forEach((id) => { cells[id]._veil.style.opacity = '0'; });   // clear any black holes on switch
+  subVeiled.clear();
+  if (m !== 'repack') {                                  // tear down absolute positioning, restore the grid
+    grid.classList.remove('pack');
+    CELL_IDS.forEach((id) => { const el = cells[id]; el.style.left = el.style.top = el.style.width = el.style.height = ''; el.style.transition = ''; el.style.opacity = ''; el.style.display = ''; el._packHidden = false; });
+  }
+  document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.classList.toggle('on', c.dataset.mode === m));
+  if (m === 'repack') { grid.classList.add('pack'); stepRepack(true); }
+  else applyModeLayout();
+}
+document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventListener('click', () => setMode(c.dataset.mode)));
+const labelChip = document.getElementById('labelChip');
+function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
+labelChip.addEventListener('click', toggleLabels);
+const MODE_KEYS = { '1': 'subdivide', '2': 'repack' };
+document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); });
+
+// keyboard access for the chip/button controls
+[playBtn, labelChip, fader, ...document.querySelectorAll('#modes .chip[data-mode]')].forEach((el) => {
+  el.tabIndex = 0; el.setAttribute('role', 'button');
+  el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && el !== fader) { e.preventDefault(); el.click(); } });
+});
+
+function paintFader() { const p = (bpm - BPM_MIN) / (BPM_MAX - BPM_MIN); knob.style.left = (p * 100) + '%'; bpmlab.textContent = Math.round(bpm) + ' BPM'; }
+let drag = false;
+function bpmFromX(x) { const r = fader.getBoundingClientRect(); bpm = BPM_MIN + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (BPM_MAX - BPM_MIN); paintFader(); }
+fader.addEventListener('pointerdown', (e) => { drag = true; fader.setPointerCapture(e.pointerId); bpmFromX(e.clientX); });
+fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); });
+fader.addEventListener('pointerup', () => { drag = false; });
+fader.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') { bpm = Math.max(BPM_MIN, bpm - 2); paintFader(); } else if (e.key === 'ArrowRight') { bpm = Math.min(BPM_MAX, bpm + 2); paintFader(); } });
+playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
+window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (scaffold.length) buildAndPlace(true); } else applyModeLayout(); });
+
+// choreographed entry — blocks assemble in, staggered
+function revealGrid() {
+  CELL_IDS.forEach((id, i) => {
+    const el = cells[id];
+    if (RM) { el.style.opacity = '1'; return; }
+    el.style.opacity = '0'; el.style.transition = 'opacity .6s cubic-bezier(.16,1,.3,1)';
+    el.style.transitionDelay = (i * 75) + 'ms';
+    requestAnimationFrame(() => requestAnimationFrame(() => { el.style.opacity = '1'; }));
+  });
+}
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  ctx = new AudioContext();
+  master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
+  space = ctx.createConvolver(); space.buffer = makeIR(3.2);
+  const rev = ctx.createGain(); rev.gain.value = 0.34; space.connect(rev); rev.connect(master);
+  bus = ctx.createGain(); bus.connect(master); bus.connect(space);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  await ctx.resume();
+  await manifestReady;
+  initImages();
+  paintFader();
+  if (mode === 'repack') { grid.classList.add('pack'); stepRepack(true); }
+  else applyModeLayout();
+  revealGrid();
+  overlay.classList.add('leaving');
+  setTimeout(() => overlay.remove(), 600);
+});
+</script>
+
+</body>
+</html>
