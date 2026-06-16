@@ -112,7 +112,7 @@
 <div id="overlay">
   <div class="wordmark">ORCHESTRA</div>
   <div class="prompt">the orchestration of sound and image. each voice of TECTONIC — STRATA owns an
-  image block and changes it with its own transition — PULSE the fold, groans a slow zoom,
+  image block and changes it with its own transition — PULSE the four-side pull-back, groans a slow zoom,
   drive a wipe, tick a hard cut — while the grid reshapes with the music and the IAAH mark keeps time.
   switch modes up top; L toggles labels; drag the tempo. sound on.</div>
   <div class="prompt">tap to enter</div>
@@ -337,7 +337,7 @@ const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
 const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
 // kind = transition verb, dur ms, swap = min beats between cuts, flash = pop opacity, tint = pop colour
 const VSPEC = {
-  pulse:   { kind: 'fold',     dur: 680,  swap: 1, flash: 0 },     // the lead — the silent-house fold (shared by subdivide + repack)
+  pulse:   { kind: 'crna',     dur: 620,  swap: 1, flash: 0 },     // the lead — the r25 four-side pull-back (the r51 subdivide effect)
   groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
   groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
   shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.26 },
@@ -359,7 +359,7 @@ function fire(vname, n, t, audioFn) {
     if (el.style.display === 'none' || el._packHidden || el._rotating) return;   // hidden / mid-relocation
     if (el._veil && el._veil.style.opacity === '1') return;    // blacked-out (negative-space) tile
     if (mode === 'repack') {                                  // lead (pulse) FOLDS; the rest crossfade in place
-      if (vname === 'pulse') { if (!el._folding && n - el._lastSwap >= 2) { doTransition(el, VSPEC.pulse, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }
+      if (vname === 'pulse') { if (n - el._lastSwap >= spec.swap) { doTransition(el, VSPEC.pulse, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }   // lead does the crna pull-back on the beat
       else if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; }
       return;
     }
