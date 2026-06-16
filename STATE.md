@@ -28,12 +28,11 @@ height**, short columns leave ragged black at their bottoms (distributed, not a 
 Verified landscape fills vertical 2→99% + most of the width. Listed on the comps slate as
 "Orchestra — Morph". The MAIN `comps/orchestra` is separate and unchanged (r60 crna).
 
-**Current main build:** `r62-minbeat-wipe` (commit `fadad9e`, 2026-06-16) — at the **minimal beat**
-(one full-screen image, `activeVoiceList().length === 1`) the lead now does the **WIPE** (new image
-clip-reveals left-to-right, `MIN_WIPE` via doTransition's `'wipe'` path — the same one r60's `drive`
-uses) instead of the crna. Applies to subdivide + repack (both show the single full-screen image at
-the minimal beat). The **crna four-side pull-back stays the lead at higher tempos**. Everything else
-as r60 below.
+**Current main build:** `r63-minbeat-crna` (commit `43cb046`, 2026-06-16) — the lead (pulse) does the
+**CRNA four-side pull-back at every tempo, including the minimal beat**. Removed r62's `MIN_WIPE`
+override, so **REPACK at 60 BPM (one full-screen image) matches the r61 morph build's SUBDIVIDE at
+60 BPM** — the reference the user pointed to (single full-screen crna). Applies to subdivide + repack.
+(r62 had briefly made the minimal beat a wipe — reverted.) Otherwise as r60 below.
 
 **r60-lead-crna** (commit `fd1013f`) — the lead transition is the **CRNA four-side pull-back** (`VSPEC.pulse.kind` fold→crna). The user pointed at **r51's
 subdivide at low BPM** as the effect they want — that is the crna (incoming clip-reveals from an
