@@ -18,27 +18,31 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r51-repack-hybrid` (commit `c439907`, 2026-06-16) — the orchestra
+**Current build:** `r52-repack-collage` (commit `dbaacee`, 2026-06-16) — the orchestra
 on Strata imagery, with the **R25 crna four-side pull-back** as PULSE's transition
 (pure CSS, GSAP removed — see Open decisions #4), the IAAH metronome box keeping
-time, three modes (subdivide / **repack-reworked** / **breathe-cracked**), tempo
-fader, accent + warm-black design pass. SUBDIVIDE layouts vary by tempo (PULSE not
-always the hero) — **untouched, the user's favorite**.
+time, **two modes** (subdivide / repack), tempo fader, accent + warm-black design pass.
 
-**This round (r51) reworked two modes** in response to user direction:
-- **REPACK → the subdivide×repack hybrid.** Old repack just cycled 4 fixed layouts
-  once per 32-beat section ("not constantly changing"). Now: tempo = density (1 full
-  image at 60 BPM; voices+images form in as you slide up), and the grid recomposes
-  **every bar (4 beats)** via a guillotine slice-packer (varied, gapless rectangles,
-  absolute %-positioned cells animating into place together). Some regions fall to
-  **BLACK** (a per-cell `.veil`) as negative space instead of always holding an image
-  — PULSE stays present, more density allows more black. Recompose also fires the
-  instant tempo crosses a tier.
-- **BREATHE → cracked.** Old breathe swelled grid *tracks*, so one cell's inhale shrank
-  every neighbour → global per-beat jitter (the distraction). Now **local** (scale
-  inside the hero cell's own frame via a new `.inner` layer, neighbours never move)
-  and **slow** (one calm inhale/exhale per bar on the lead block only).
-- Cells gained `.inner` (breath-scaled) + `.veil` (negative space) layers.
+**This round (r52)** reworked both modes again + tabled the third, per user direction
+("images shouldn't move; replace them in different places; fixed AR's; don't cover
+100%; black opens up"):
+- **REPACK → a STILL fixed-AR collage** (replacing r51's moving slice-grid). Boxes no
+  longer slide. A stable scaffold of fixed-aspect-ratio tiles is packed onto a fine
+  module grid (14×9 / portrait 9×14) with a **render-time gutter** (the black gaps)
+  and a **coverage cap (~0.84)** so it never fills 100% — empty areas read as negative
+  space. **Tempo = how many tiles are LIT** (1 image at 60 BPM → ~5 at 104 → 6 at max).
+  Periodically (every bar) the system **relocates one image to a free tile by fading it
+  out here and in over there — never translating** ("appears in a different place it
+  sees fit"), so black opens and closes. Per-voice swaps still change the image inside a
+  lit tile in place. Identity voice→tile binding (the per-section rebind is skipped in
+  repack so tiles stay put). Spare scaffold positions (= voices+3 built, voices lit) are
+  the relocation targets.
+- **SUBDIVIDE → in/out black.** Keeps the favored tiled layout (untouched mechanic), but
+  now fades cells to black and back on a per-bar cadence (`.veil`) — images come in and
+  out, black areas open up in the grid.
+- **BREATHE → TABLED.** Two attempts (r50 global track-swell = jitter; r51 local
+  image-scale = inert) — neither landed. Chip + key removed, logic parked. The `.inner`
+  + `.veil` cell layers it introduced stay (the collage/in-out use `.veil`).
 
 **Live:**
 - Slate / all comps → https://nessim-higson.github.io/uniqlock-v2/comps/
