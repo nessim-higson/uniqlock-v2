@@ -80,7 +80,9 @@ Newest first. All under `comps/`, served at port 4191, listed on the slate page.
 
 **Landmarks (the keepers):**
 - `landmark-01-the-door` — the solo + crna 4-side transition + mark-as-door drawer (click logo → pause everything + slide open a nav drawer).
-- `landmark-02-orchestra` — this version: the orchestra sound+image probe.
+- `landmark-02-orchestra` — the orchestra sound+image probe.
+- `landmark-03-fold-ribbon` — **the fold transition (R28)**: a joined ribbon / prism that rotates a face toward you per beat, neighbours folding into black. User's pick — "the smoothest." This is THE transition to use going forward (a per-block, all-sides version of it is wired into the orchestra build).
+- `landmark-04-tempo-melody` — the tempo comp (R31): you hold the metronome (BPM 30–180), work changes per beat via the crna pull, persistent generative melody + reverb + humanized audio.
 
 ---
 
@@ -171,8 +173,11 @@ cells.
    blocks; build the suite (ARC/Magma/Fault orchestras).
 3. **Which comp becomes the main piece**, and which timebase it uses (sacred
    conductor vs. free-tempo).
-4. **Transition** for the main piece — the crna 4-side pull (from `tempo`) is
-   favored; fold is the alternate.
+4. **Transition** — DECIDED (2026-06-16): the **fold** (R28 / `landmark-03-fold-ribbon`)
+   is the chosen transition — user called it the smoothest. The orchestra build now
+   uses a per-block, all-sides version of it (`kind: 'fold'` on PULSE: the old image
+   hinges back on a cycling edge revealing the new one held behind). The crna pull is
+   retired as the default (kept in code as an alternate `kind: 'pull'`).
 5. **Drawer / nav** — wire real destinations into the mark-as-door drawer
    (`landmark-01`).
 6. Carry-overs from SPEC: shareable `?seed=` permutation URL; what the "hourly

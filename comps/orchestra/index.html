@@ -16,7 +16,7 @@
   ::selection { background: var(--accent); color: #1a1500; }
 
   #grid { position: absolute; inset: 0; display: grid; gap: 0; }
-  .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #141416; }
+  .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #141416; perspective: 1100px; }
   .cell .ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
     opacity: 0; clip-path: inset(0 0 0 0); transform-origin: center; backface-visibility: hidden; }
   .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 2; pointer-events: none; }
@@ -197,6 +197,20 @@ function doTransition(el, spec) {
     back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0';
     void back.offsetWidth; front.style.opacity = '0'; el._front = bk; if (spec.kind === 'cut') popFlash(el, 0.22, 110); return;
   }
+  if (spec.kind === 'fold') {                            // the silent-house fold: new image sits full
+    const side = SIDES[pulseSide++ % SIDES.length];      // behind, old image hinges back on a cycling edge
+    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0'; back.style.zIndex = '0'; back.style.transformOrigin = 'center';
+    front.style.zIndex = '1'; front.style.transition = 'none'; front.style.opacity = '1'; front.style.clipPath = 'inset(0 0 0 0)'; front.style.borderRadius = '0';
+    front.style.transformOrigin = side === 'up' ? 'top' : side === 'down' ? 'bottom' : side === 'left' ? 'left' : 'right';
+    front.style.transform = 'rotateX(0deg)';
+    void front.offsetWidth;
+    const rot = side === 'up' ? 'rotateX(-90deg)' : side === 'down' ? 'rotateX(90deg)' : side === 'left' ? 'rotateY(90deg)' : 'rotateY(-90deg)';
+    front.style.transition = `transform ${dur}ms ${EASE}`;
+    front.style.transform = rot;
+    el._front = bk;
+    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.transformOrigin = 'center'; front.style.opacity = '0'; front.style.zIndex = '0'; }, dur + 40);
+    return;
+  }
   if (spec.kind === 'pull') {                            // the crna move: new image sits full BEHIND,
     const side = SIDES[pulseSide++ % SIDES.length];      // old image pulls back + masks away on top
     back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0'; back.style.zIndex = '0';
@@ -282,7 +296,7 @@ const VOICES = ['pulse', 'groanA', 'groanB', 'shimmer', 'drive', 'tick'];
 const NAME = { pulse: 'PULSE', groanA: 'GROAN A', groanB: 'GROAN B', shimmer: 'SHIMMER', drive: 'DRIVE', tick: 'TICK' };
 // kind = transition verb, dur ms, swap = min beats between cuts, flash = pop opacity, tint = pop colour
 const VSPEC = {
-  pulse:   { kind: 'pull',     dur: 600,  swap: 1, flash: 0 },     // the lead — cuts every beat, no flash
+  pulse:   { kind: 'fold',     dur: 620,  swap: 1, flash: 0 },     // the lead — silent-house fold, cycles all sides
   groanA:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
   groanB:  { kind: 'scale',    dur: 1100, swap: 1, flash: 0.14 },
   shimmer: { kind: 'dissolve', dur: 320,  swap: 2, flash: 0.26 },
