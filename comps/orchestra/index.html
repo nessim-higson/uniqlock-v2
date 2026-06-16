@@ -16,11 +16,15 @@
   ::selection { background: var(--accent); color: #1a1500; }
 
   #grid { position: absolute; inset: 0; display: grid; gap: 0; }
+  #grid.pack { display: block; }
+  #grid.pack .cell { position: absolute; }
   .cell { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #141416; perspective: 1100px; }
+  .cell .inner { position: absolute; inset: 0; transform-origin: center; will-change: transform; }
+  .cell .veil { position: absolute; inset: 0; background: var(--black); opacity: 0; z-index: 4; pointer-events: none; transition: opacity .6s ease; }
   .cell .ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
     opacity: 0; clip-path: inset(0 0 0 0); transform-origin: center; backface-visibility: hidden; }
-  .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 2; pointer-events: none; }
-  .lab { position: absolute; left: 8px; top: 7px; z-index: 3; font-size: 11px; letter-spacing: 0.08em;
+  .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; }
+  .lab { position: absolute; left: 8px; top: 7px; z-index: 5; font-size: 11px; letter-spacing: 0.08em;
     font-weight: 500; color: #fff; background: rgba(0,0,0,0.42); padding: 2px 6px; border-radius: 3px;
     display: none; pointer-events: none; }
   #grid.labels .lab { display: inline-block; }
@@ -178,11 +182,14 @@ const cells = { pulse: document.getElementById('c-pulse'), ga: document.getEleme
 const CELL_IDS = ['pulse', 'ga', 'gb', 'shim', 'drive', 'tick'];
 CELL_IDS.forEach((id) => {
   const el = cells[id];
+  const inner = document.createElement('div'); inner.className = 'inner';
   const a = document.createElement('img'); a.className = 'ph'; a.decoding = 'async';
   const b = document.createElement('img'); b.className = 'ph'; b.decoding = 'async';
   const fl = document.createElement('div'); fl.className = 'flash';
-  el.append(a, b, fl);
-  el._layers = [a, b]; el._front = 0; el._flash = fl; el._lastSwap = -99;
+  inner.append(a, b, fl);
+  const veil = document.createElement('div'); veil.className = 'veil';
+  el.append(inner, veil);
+  el._layers = [a, b]; el._front = 0; el._flash = fl; el._lastSwap = -99; el._inner = inner; el._veil = veil; el._packHidden = false;
 });
 function initImages() { CELL_IDS.forEach((id) => { const el = cells[id]; if (!pool.length) return; el._layers[0].src = nextImg(); el._layers[0].style.opacity = '1'; }); }
 
@@ -298,21 +305,27 @@ function applyLayout(lay, key) {
   baseCols = [...o.cols]; baseRows = [...o.rows]; curPlace = o.place;
 }
 
-let breatheTO = 0;
-function doBreathe(areas) {
-  if (!areas.length) return;
-  const cols = [...baseCols], rows = [...baseRows];
-  areas.forEach((a) => { const p = curPlace[a]; if (!p) return; cols[p.c - 1] = baseCols[p.c - 1] * 1.3; rows[p.r - 1] = baseRows[p.r - 1] * 1.28; });
-  grid.style.transition = 'grid-template-columns .14s ease-out, grid-template-rows .14s ease-out';
-  grid.style.gridTemplateColumns = cols.map((f) => f + 'fr').join(' ');
-  grid.style.gridTemplateRows = rows.map((f) => f + 'fr').join(' ');
-  clearTimeout(breatheTO);
-  const back = Math.max(160, (60 / bpm) * 1000 * 0.7);
-  breatheTO = setTimeout(() => {
-    grid.style.transition = 'grid-template-columns ' + back + 'ms ease, grid-template-rows ' + back + 'ms ease';
-    grid.style.gridTemplateColumns = baseCols.map((f) => f + 'fr').join(' ');
-    grid.style.gridTemplateRows = baseRows.map((f) => f + 'fr').join(' ');
-  }, 110);
+// BREATHE, cracked: the old version swelled grid TRACKS, so one cell's inhale
+// shrank every neighbour — a global, per-beat jitter. now the breath is LOCAL
+// (scale inside the hero cell's own frame, neighbours never move) and SLOW
+// (one calm inhale/exhale per bar on the single lead block).
+function doBreathe(heroArea) {
+  const beatMs = (60 / bpm) * 1000;
+  CELL_IDS.forEach((id) => {
+    const el = cells[id], inr = el._inner;
+    if (id === heroArea && el.style.display !== 'none') {
+      inr.style.transition = 'transform ' + (beatMs * 1.7) + 'ms cubic-bezier(.37,0,.4,1), filter ' + (beatMs * 1.7) + 'ms ease';
+      inr.style.transform = 'scale(1.06)'; inr.style.filter = 'brightness(1.07)';
+      clearTimeout(el._breathTO);
+      el._breathTO = setTimeout(() => {
+        inr.style.transition = 'transform ' + (beatMs * 2.1) + 'ms cubic-bezier(.4,0,.5,1), filter ' + (beatMs * 2.1) + 'ms ease';
+        inr.style.transform = 'scale(1)'; inr.style.filter = 'brightness(1)';
+      }, beatMs * 1.5);
+    } else if (inr.style.transform && inr.style.transform !== 'scale(1)') {
+      inr.style.transition = 'transform ' + (beatMs * 1.4) + 'ms ease, filter ' + (beatMs * 1.4) + 'ms ease';
+      inr.style.transform = 'scale(1)'; inr.style.filter = 'brightness(1)';
+    }
+  });
 }
 
 // ── the voices, their flash/swap, and the rotating voice → block binding ──
@@ -369,10 +382,74 @@ function buildSubdivide() {
   return { cols: tpl.cols, rows: tpl.rows, place };
 }
 
+// ── REPACK, reworked: a constantly-recomposing tempo-density packer ──
+// the old repack only swapped between 4 fixed layouts once per 32-beat section.
+// this hybrid keeps subdivide's idea (tempo = how many images are alive) but
+// recomposes EVERY BAR via a guillotine slice — varied, gapless rectangles —
+// and lets some regions fall to BLACK (negative space) instead of always
+// holding an image. raise the tempo and more voices + images form in.
+let packSeed = 20260616 >>> 0;
+function rng() { packSeed = (packSeed * 1664525 + 1013904223) >>> 0; return packSeed / 4294967296; }
+function sliceRects(n) {
+  let rects = [{ x: 0, y: 0, w: 1, h: 1 }];
+  while (rects.length < n) {
+    rects.sort((a, b) => b.w * b.h - a.w * a.h);   // always split the largest region
+    const r = rects.shift();
+    const vert = r.w >= r.h;                        // cut across the longer axis → no slivers
+    const f = 0.36 + rng() * 0.28;                  // 0.36..0.64 split
+    if (vert) rects.push({ x: r.x, y: r.y, w: r.w * f, h: r.h }, { x: r.x + r.w * f, y: r.y, w: r.w * (1 - f), h: r.h });
+    else rects.push({ x: r.x, y: r.y, w: r.w, h: r.h * f }, { x: r.x, y: r.y + r.h * f, w: r.w, h: r.h * (1 - f) });
+  }
+  return rects;
+}
+let packBar = -1, lastLiveCount = -1;
+function placeCell(el, rect, isVoid, instant) {
+  const Lx = (rect.x * 100) + '%', Ty = (rect.y * 100) + '%', W = (rect.w * 100) + '%', H = (rect.h * 100) + '%';
+  const appearing = el._packHidden || el.style.display === 'none';
+  el.style.display = '';
+  const tr = 'left .7s cubic-bezier(.5,.05,.2,1), top .7s cubic-bezier(.5,.05,.2,1), width .7s cubic-bezier(.5,.05,.2,1), height .7s cubic-bezier(.5,.05,.2,1), opacity .55s ease';
+  if (instant || appearing) {
+    el.style.transition = 'none';
+    el.style.left = Lx; el.style.top = Ty; el.style.width = W; el.style.height = H;
+    el.style.opacity = (appearing && !instant) ? '0' : '1';
+    void el.offsetWidth;
+    el.style.transition = tr;
+    if (appearing && !instant) el.style.opacity = '1';
+  } else {
+    el.style.transition = tr;
+    el.style.left = Lx; el.style.top = Ty; el.style.width = W; el.style.height = H; el.style.opacity = '1';
+  }
+  el._packHidden = false;
+  el._veil.style.opacity = isVoid ? '1' : '0';
+}
+function hideCell(el, instant) {
+  el._veil.style.opacity = '0';
+  if (instant) { el._packHidden = true; el.style.display = 'none'; el.style.opacity = '0'; return; }
+  if (el._packHidden) return;
+  el._packHidden = true;
+  el.style.transition = 'opacity .45s ease'; el.style.opacity = '0';
+  setTimeout(() => { if (el._packHidden && mode === 'repack') el.style.display = 'none'; }, 480);
+}
+function applyPack(instant) {
+  const voices = activeVoiceList(), n = voices.length;
+  const rects = sliceRects(n);
+  rects.sort((a, b) => b.w * b.h - a.w * a.h);       // biggest first → visual hierarchy
+  const others = voices.filter((v) => v !== 'pulse');
+  for (let i = others.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [others[i], others[j]] = [others[j], others[i]]; }
+  const pulseRect = (n > 1 && rng() < 0.4) ? 1 : 0;  // PULSE biased to a large region, not always #1
+  const assign = { pulse: pulseRect };
+  let ri = 0; others.forEach((v) => { while (ri === pulseRect) ri++; assign[v] = ri++; });
+  const maxBlack = Math.max(0, Math.floor((n - 1) / 2));   // more density → more negative space allowed
+  let blacks = 0; const voidSet = new Set();
+  others.forEach((v) => { if (blacks < maxBlack && rng() < 0.3) { voidSet.add(v); blacks++; } });
+  const liveAreas = new Set();
+  voices.forEach((v) => { const area = binding[v]; liveAreas.add(area); placeCell(cells[area], rects[assign[v]], voidSet.has(v), instant); });
+  CELL_IDS.forEach((id) => { if (!liveAreas.has(id)) hideCell(cells[id], instant); });
+}
+
 function applyModeLayout() {
   const sec = Math.max(0, curSection);
   if (mode === 'breathe') applyLayout(L.broadcast, 'broadcast');
-  else if (mode === 'repack') { const a = [L.broadcast, L.columns, L.stack, L.grid6]; const i = sec % a.length; applyLayout(a[i], 'repack' + i); }
   else if (mode === 'subdivide') applyLayout(buildSubdivide(), 'sub' + activeVoiceList().length + '-' + sec);
 }
 
@@ -394,8 +471,13 @@ let metroDeg = 0;
 function onBeat() {
   beatN++; beatFired = [];
   if (ctx) beat(beatN, ctx.currentTime);
-  applyModeLayout();
-  if (mode === 'breathe' && !RM) doBreathe(beatFired.filter((f) => f.strong).map((f) => f.area));
+  if (mode === 'repack') {                               // recompose every bar, or the instant tempo crosses a tier
+    const live = activeVoiceList().length, bar = Math.floor((beatN - 1) / 4);
+    if (live !== lastLiveCount || bar !== packBar) { packBar = bar; lastLiveCount = live; applyPack(false); }
+  } else {
+    applyModeLayout();
+    if (mode === 'breathe' && !RM && beatN % 4 === 1) doBreathe(binding['pulse']);  // one slow breath per bar, on the lead
+  }
   if (!RM) { metroDeg += 90; metro.style.transform = 'rotate(' + metroDeg + 'deg)'; }  // the mark keeps time
   statusEl.textContent = 'ORCHESTRA · STRATA · ' + mode.toUpperCase() + ' · §' + (curSection + 1) + ' · ' + Math.round(bpm) + ' BPM';
 }
@@ -407,7 +489,17 @@ function loop(t) {
 requestAnimationFrame(loop);
 
 // ── controls ──
-function setMode(m) { mode = m; lastLayoutKey = ''; document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.classList.toggle('on', c.dataset.mode === m)); applyModeLayout(); }
+function setMode(m) {
+  mode = m; lastLayoutKey = '';
+  if (m !== 'repack') {                                  // tear down absolute pack positioning, restore grid
+    grid.classList.remove('pack');
+    CELL_IDS.forEach((id) => { const el = cells[id]; el.style.left = el.style.top = el.style.width = el.style.height = ''; el.style.transition = ''; el.style.opacity = ''; el.style.display = ''; el._packHidden = false; el._veil.style.opacity = '0'; });
+  }
+  if (m !== 'breathe') CELL_IDS.forEach((id) => { const inr = cells[id]._inner; inr.style.transition = ''; inr.style.transform = ''; inr.style.filter = ''; });
+  document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.classList.toggle('on', c.dataset.mode === m));
+  if (m === 'repack') { grid.classList.add('pack'); lastLiveCount = -1; packBar = -1; applyPack(true); }
+  else applyModeLayout();
+}
 document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventListener('click', () => setMode(c.dataset.mode)));
 const labelChip = document.getElementById('labelChip');
 function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
@@ -456,7 +548,8 @@ overlay.addEventListener('click', async () => {
   await manifestReady;
   initImages();
   paintFader();
-  applyModeLayout();
+  if (mode === 'repack') { grid.classList.add('pack'); lastLiveCount = -1; packBar = -1; applyPack(true); }
+  else applyModeLayout();
   revealGrid();
   overlay.classList.add('leaving');
   setTimeout(() => overlay.remove(), 600);
