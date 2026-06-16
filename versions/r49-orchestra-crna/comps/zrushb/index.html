@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>COMP 10 — z-rush broadcast</title>
+<style>
+  @font-face {
+    font-family: "Uniqlo";
+    src: url("https://megajerk.github.io/Uniqlock/assets/fonts/7_UniqloBold.woff") format("woff");
+    font-weight: 700;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000;
+    font-family: "Helvetica Neue", Helvetica, sans-serif; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #metro { position: fixed; left: 22px; top: 22px; width: 4.2vmin; height: 4.2vmin;
+    z-index: 7; background: #fff; display: none; align-items: center; justify-content: center;
+    transition: transform 220ms cubic-bezier(.3, 0, .15, 1); }
+  #metro span { font-weight: 700; font-size: 1.1vmin; letter-spacing: 0.04em; color: #111; }
+  #overlay { position: absolute; inset: 0; z-index: 10; display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 2.4vmin;
+    background: #000; color: #fff; cursor: pointer; transition: opacity 500ms ease; }
+  #overlay.leaving { opacity: 0; pointer-events: none; }
+  #overlay .wordmark { font-size: 4.4vmin; font-weight: 700; letter-spacing: 0.18em; }
+  #overlay .prompt { font-size: 1.8vmin; opacity: 0.55; letter-spacing: 0.1em; text-align: center; line-height: 1.8; }
+  #label { position: fixed; left: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.14em; }
+  #label a { color: inherit; }
+  #status { position: fixed; right: 18px; bottom: 16px; z-index: 5; color: #fff;
+    mix-blend-mode: difference; font-size: 11px; letter-spacing: 0.18em;
+    font-variant-numeric: tabular-nums; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<div id="metro"><span>IAAH</span></div>
+<div id="label">COMP 10 — Z-RUSH BROADCAST · <a href="../">back</a></div>
+<div id="status"></div>
+<div id="overlay">
+  <div class="wordmark">Z-RUSH</div>
+  <div class="prompt">a gallery rushing past, every piece facing you — a hero work
+  presented dead-center<br>every eight beats, the field scattered around your path.
+  the clock and the dancers<br>ride the same stream. same minute, same rush, for everyone.</div>
+  <div class="prompt">m mute · click to enter, sound on</div>
+</div>
+
+<script>window.UQ_ASSET_ROOT = location.origin + location.pathname.replace(/versions\/.*$/, "");</script>
+<script type="module">
+import * as THREE from 'three';
+import { createConductor } from '../../js/conductor.js';
+import { createMusic } from '../../js/music.js';
+import { VIDEOS, HOUR_COLORS, timeOfDay, loadImageryManifest } from '../../js/data.js';
+
+const overlay = document.getElementById('overlay');
+const statusEl = document.getElementById('status');
+const metro = document.getElementById('metro');
+
+const conductor = createConductor();
+const music = createMusic(conductor);
+
+// ═══ the conveyor: plane n arrives at the camera exactly at beat n*B.
+// distance is a stepped function of the clock — the rush IS the beat. ═══
+const B = 2;        // beats between arrivals
+const GAP = 7;      // world units between planes (3.5 units per beat-step)
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// ── renderer + lens ──
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+let VW = innerWidth, VH = innerHeight;
+const camera = new THREE.PerspectiveCamera(58, VW / VH, 0.1, 140);
+camera.position.z = 2;
+const VOID = 0x232120;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(VOID);
+scene.fog = new THREE.Fog(VOID, 26, 80);
+
+(function backdrop() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(256, 256, 40, 256, 256, 360);
+  grad.addColorStop(0, '#403b37');
+  grad.addColorStop(0.55, '#2b2826');
+  grad.addColorStop(1, '#191717');
+  g.fillStyle = grad; g.fillRect(0, 0, 512, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: tex, fog: false }));
+  mesh.scale.set(320, 320, 1);
+  mesh.position.z = -110;
+  scene.add(mesh);
+})();
+
+let rt = new THREE.WebGLRenderTarget(VW * renderer.getPixelRatio(), VH * renderer.getPixelRatio());
+const lensScene = new THREE.Scene();
+const lensCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+lensCam.position.z = 1;
+const lensMat = new THREE.ShaderMaterial({
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy,0.,1.); }`,
+  fragmentShader: `
+    varying vec2 vUv;
+    uniform sampler2D tex1; uniform float textureScale; uniform float time;
+    uniform float displacement; uniform float scrollDif;
+    void main(){
+      vec4 c1 = texture2D(tex1, vUv);
+      float lum = (c1.r + c1.g + c1.b) / 3.0;
+      vec2 cv = vUv - 0.5;
+      float oc = (0.5 - distance(cv, vec2(0.0))) * (textureScale * 10.0);
+      vec2 nv = vUv - 0.5;
+      nv *= 1.0 + 0.5 * displacement - (1.0 - oc) * displacement * 0.5;
+      nv.y *= 1.0 - sin(time * 0.001 + vUv.x * 10.1 + lum * 10.1) * scrollDif * 0.01;
+      nv += 0.5;
+      gl_FragColor = texture2D(tex1, nv);
+    }`,
+  uniforms: {
+    tex1: { value: rt.texture },
+    textureScale: { value: 0.4 },
+    time: { value: 0 },
+    displacement: { value: 0.35 },
+    scrollDif: { value: 0 },
+  },
+});
+lensScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), lensMat));
+
+function resize() {
+  VW = innerWidth; VH = innerHeight;
+  camera.aspect = VW / VH;
+  camera.updateProjectionMatrix();
+  renderer.setSize(VW, VH);
+  rt.setSize(VW * renderer.getPixelRatio(), VH * renderer.getPixelRatio());
+}
+addEventListener('resize', resize);
+resize();
+
+// ── content ──
+let manifest = [];
+const texLoader = new THREE.TextureLoader();
+
+const vids = [0, 1].map(() => {
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.crossOrigin = 'anonymous'; v.preload = 'auto';
+  return v;
+});
+let vidBusy = [false, false];
+
+const liveClockPaints = new Set();
+function makeClockTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 640;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const paint = (date) => {
+    const g = c.getContext('2d');
+    const [r, gr, b] = HOUR_COLORS[date.getHours()];
+    const invert = date.getSeconds() % 2 === 1;
+    g.fillStyle = invert ? '#fff' : `rgb(${r},${gr},${b})`;
+    g.fillRect(0, 0, 640, 640);
+    g.fillStyle = invert ? `rgb(${r},${gr},${b})` : '#fff';
+    g.font = '700 92px Uniqlo, "Helvetica Neue", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(date.toTimeString().slice(0, 8), 320, 330);
+    tex.needsUpdate = true;
+  };
+  paint(new Date());
+  return { tex, paint };
+}
+
+// ── planes: serial n, deterministic content, alternating lanes ──
+const planes = new Map(); // n -> record
+
+function buildPlane(n) {
+  const rng = mulberry32((n * 2654435761) >>> 0);
+  const group = new THREE.Group();
+  scene.add(group);
+  const record = { group, disposables: [], clockPaint: null, video: null };
+
+  // the gallery layout (kidzfrmnowhere read): every piece faces the
+  // camera dead-on. Every 4th piece is a HERO — presented centered, big,
+  // straight at you. The rest are the field: a golden-angle scatter
+  // around your flight path, passing at the edges of the frame.
+  const isHero = n % 4 === 0;
+  const roll = rng();
+  let px, py;
+  if (isHero) {
+    px = (rng() - 0.5) * 0.6;
+    py = (rng() - 0.5) * 0.4;
+  } else {
+    const ang = (n % 21) * 2.39996 + rng() * 0.5;
+    const r = 1.8 + rng() * 1.9;
+    px = Math.cos(ang) * r * 1.25;
+    py = Math.sin(ang) * r * 0.55;
+  }
+
+  if (isHero && roll < 0.2) {
+    // the clock, presented like a work
+    const { tex, paint } = makeClockTexture();
+    record.clockPaint = paint;
+    liveClockPaints.add(paint);
+    const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true, transparent: true });
+    record.disposables.push(tex, mat);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(3.8, 3.8), mat);
+    m.position.set(px, py, 0);
+    group.add(m);
+  } else if (roll < (isHero ? 0.45 : 0.15) && vidBusy.indexOf(false) >= 0) {
+    const vi = vidBusy.indexOf(false);
+    vidBusy[vi] = true;
+    record.video = vi;
+    const v = vids[vi];
+    const pool = VIDEOS[timeOfDay(new Date().getHours())];
+    v.src = pool[Math.floor(rng() * pool.length)];
+    v.load();
+    const tex = new THREE.VideoTexture(v);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true, transparent: true });
+    record.disposables.push(tex, mat);
+    const size = isHero ? [5.9, 4.4] : [4.0, 3.0];
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(size[0], size[1]), mat);
+    m.position.set(px, py, 0);
+    group.add(m);
+    v.play().catch(() => {});
+  } else {
+    const idx = Math.floor(rng() * manifest.length);
+    const h = isHero
+      ? [4.6, 5.4][Math.floor(rng() * 2)]
+      : [2.4, 3.2, 4.0][Math.floor(rng() * 3)];
+    texLoader.load(manifest[idx], (tex) => {
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const a = tex.image.width / tex.image.height;
+      const mat = new THREE.MeshBasicMaterial({ map: tex, fog: true, transparent: true });
+      record.disposables.push(tex, mat);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(h * a, h), mat);
+      m.position.set(px, py, 0);
+      group.add(m);
+    });
+  }
+
+  record.dispose = () => {
+    scene.remove(group);
+    group.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+    record.disposables.forEach((d) => d.dispose && d.dispose());
+    if (record.clockPaint) liveClockPaints.delete(record.clockPaint);
+    if (record.video !== null) { vids[record.video].pause(); vidBusy[record.video] = false; }
+  };
+  planes.set(n, record);
+}
+
+function ensurePlanes(nNear) {
+  for (let n = nNear; n <= nNear + 9; n++) {
+    if (!planes.has(n)) buildPlane(n);
+  }
+  for (const [n, rec] of planes) {
+    if (n < nNear - 1 || n > nNear + 10) { rec.dispose(); planes.delete(n); }
+  }
+}
+
+// ── the r03 displacement arc: loud on entry, near-zero at hero, building
+// again as the work closes on the camera ──
+function dispTarget(u) {
+  if (u < 0.2) return 0.45 - (u / 0.2) * 0.15;
+  if (u < 0.65) return 0.30 - ((u - 0.2) / 0.45) * 0.22;
+  return 0.08 + ((u - 0.65) / 0.35) * 0.45;
+}
+
+let impulse = 0;
+let disp = 0.35;
+let lastT = 0;
+
+function render(t) {
+  const dt = Math.min((t - lastT) / 1000, 0.1);
+  lastT = t;
+
+  const phase = conductor.phase();
+  const db = Math.floor(phase);
+  const frac = phase - db;
+  const snap = 1 - Math.pow(1 - Math.min(frac / 0.35, 1), 3);
+  const eased = db + snap;
+
+  const nNear = Math.floor(eased / B);
+  ensurePlanes(nNear);
+
+  for (const [n, rec] of planes) {
+    const z = (eased - n * B) * (GAP / B);
+    rec.group.position.z = z;
+    // fade as the plane crosses the camera plane
+    const op = z > 0.4 ? Math.max(0, 1 - (z - 0.4) / 1.8) : 1;
+    rec.group.traverse((o) => { if (o.material) o.material.opacity = op; });
+  }
+
+  impulse *= Math.pow(0.12, dt);
+  const u = ((eased % B) + B) % B / B;
+  disp += (dispTarget(u) - disp) * Math.min(1, dt * 5);
+  lensMat.uniforms.displacement.value = disp;
+  lensMat.uniforms.scrollDif.value = impulse * 0.8;
+  lensMat.uniforms.time.value = t;
+
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  renderer.render(lensScene, lensCam);
+  requestAnimationFrame(render);
+}
+
+let metroDeg = 0;
+conductor.onBeat((beat) => {
+  music.onBeat(beat);
+  impulse = 1;
+  metroDeg += 90;
+  metro.style.transform = `rotate(${metroDeg}deg)`;
+  for (const paint of liveClockPaints) paint(beat.date);
+  statusEl.textContent = `LIVE · PIECE ${Math.floor(beat.wallSec / B) % 10000} · ${beat.date.toTimeString().slice(0, 8)}`;
+});
+
+// ── entry ──
+let entered = false;
+const manifestReady = loadImageryManifest();
+const musicReady = music.load();
+
+overlay.addEventListener('click', async () => {
+  if (entered) return;
+  entered = true;
+  try {
+    await conductor.start();
+    manifest = await manifestReady;
+    overlay.classList.add('leaving');
+    setTimeout(() => overlay.remove(), 600);
+    metro.style.display = 'flex';
+    requestAnimationFrame(render);
+    musicReady.then(() => music.begin()).catch((err) => {
+      console.warn('[zrushb] music failed, running silent:', err);
+      statusEl.textContent = 'music failed — running silent';
+    });
+  } catch (err) {
+    console.error(err);
+    entered = false;
+    const prompt = overlay.querySelector('.prompt');
+    if (prompt) prompt.textContent = `failed to start: ${err.message} — click to retry`;
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'm' && entered) music.toggleMute();
+});
+</script>
+
+</body>
+</html>
