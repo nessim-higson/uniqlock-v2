@@ -18,8 +18,20 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r59-fold-ribbon` (commit `875a528`, 2026-06-16) — same as r58 but the fold
-is now the **real dynamic fold-ribbon**, not the flat hinge. `doTransition`'s `'fold'` branch
+**Current build:** `r60-lead-crna` (commit `fd1013f`, 2026-06-16) — the lead transition is back
+to the **CRNA four-side pull-back** (`VSPEC.pulse.kind` fold→crna). The user pointed at **r51's
+subdivide at low BPM** as the effect they want — that is the crna (incoming clip-reveals from an
+edge while the outgoing pulls back 30% + scale .8 + fade, cycling all four sides), **not** the
+3D fold built in r58/r59. So both subdivide and repack now show a single full-screen crna pull
+at low BPM, and the crna on the lead tile as you add more (lead fires every beat). The
+fold-ribbon prism code stays **parked** in `doTransition` (unused, revivable). Full-screen
+single-beat geometry + AR-aware tiles + tempo-scaled size (r57/r58) all unchanged.
+
+**Superseded:** r59-fold-ribbon (real 2-face 3D prism fold) and r58-repack-fold (flat hinge) —
+the fold was a misread; the wanted effect is the crna. Prism code retained for possible reuse.
+
+r59 was: same as r58 but the fold
+is the **real dynamic fold-ribbon**, not the flat hinge. `doTransition`'s `'fold'` branch
 builds a GSAP-free **2-face 3D prism**: a `.fold-hinge` (`transform-style: preserve-3d`, pushed
 back `translateZ(-R)`) carries two `.fold-face` children — the current work on the front face
 (`translateZ(R)`), the incoming folded 90° at the seam. The hinge rotates 90° over the beat so
