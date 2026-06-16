@@ -18,22 +18,27 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r54-repack-columns` (commit `1e66ddd`, 2026-06-16) — REPACK is a
-**native-AR COLUMN collage** where images **butt against one another** and the grid
-**continuously morphs**. Canvas = vertical columns of varying width; slot 0 is a single
-full-height **"parent"** column, the rest group into columns of one or two stacked images
-(`buildColStruct`). A 1-image column is full height (width = H·AR); a 2-image column shares a
-width chosen so the two native-AR images stack to exactly fill the height. Columns scale
-together if they overrun the width; leftover is centred → **black at the sides** (and
-top/bottom if scaled). **Zero crop** (box AR === image AR, verified). MORPH + parents: the
-column structure is stable until tempo changes; each slot swaps its image on a cadence
-(parent/slot-0 longest, `periodFor`), and every swap relayouts so widths/heights **animate**
-to the new fit. AR is read fresh from `arMap` each layout (learned on load via
-`setLayerImg`→`scheduleRelayout`) so swapped images never crop. Reference: NEVVERLAND.mov
-stills. Tempo = image count (1 parent at 60 BPM → 6 at max). SUBDIVIDE unchanged; BREATHE
-tabled. **History of the repack rework:** r51 moving slice-grid → r52 fixed-AR tiles
-(cropped) → r53 native-AR shelves (uniform/"stock") → **r54 native-AR columns + parents +
-morph** (current). Each prior is superseded.
+**Current build:** `r55-repack-dynamic` (commit `7f6acf8`, 2026-06-16) — REPACK is the
+**genuinely-dynamic synthesis** the user asked for, pulling together what they liked across
+builds: r52's **gaps + imagery coming in/out** and r51's **seamless whole-structure
+movement**. Engine:
+- **Dynamic structure** — `rollStruct(N)` re-rolls the column grouping AND order **every bar**
+  (varied 1/2/3-stacks, shuffled so the **parent** can sit anywhere). Slot 0 stays a single
+  parent column (its image persists; it just moves). The layout keeps changing — not a fixed
+  structure (that was r54's limit, the "not genuinely dynamic" complaint).
+- **Seamless morph** — every re-roll relayouts and all cells animate (left/top/width/height)
+  to the new fit; the whole structure flows.
+- **Gaps** — a gutter inset opens black gaps between every work (both modes).
+- **In/out** — per-slot image swaps on a cadence (parents slowest, `periodFor`) + the
+  structural re-rolls move imagery to new places; leaving cells fade, new ones fade in.
+- **FIT/FILL toggle** (chip + `f` key) — **FIT** = each image at native AR, no crop, big
+  black negative space; **FILL** = the same column proportions stretched to fill the width,
+  images crop. Lets the user see both image-shape approaches live (they asked to "see both").
+
+Tempo = image count (1 parent at 60 BPM → 6 at max). SUBDIVIDE unchanged; BREATHE tabled.
+**Repack rework history:** r51 moving slice-grid → r52 fixed-AR tiles+gaps+relocate (cropped)
+→ r53 native-AR shelves (uniform) → r54 native-AR columns (butted, structure too static) →
+**r55 dynamic columns + gaps + in/out + seamless morph + FIT/FILL** (current).
 
 **Older:** `r52-repack-collage` (commit `dbaacee`, 2026-06-16) — the orchestra
 on Strata imagery, with the **R25 crna four-side pull-back** as PULSE's transition
