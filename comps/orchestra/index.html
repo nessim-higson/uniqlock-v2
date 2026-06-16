@@ -24,6 +24,10 @@
   .cell .ph { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
     opacity: 0; clip-path: inset(0 0 0 0); transform-origin: center; backface-visibility: hidden; }
   .cell .flash { position: absolute; inset: 0; background: #fff; opacity: 0; z-index: 3; pointer-events: none; }
+  /* the dynamic fold: a 2-face prism that rotates the incoming work toward you */
+  .fold-hinge { position: absolute; inset: 0; transform-style: preserve-3d; z-index: 6; }
+  .fold-face { position: absolute; inset: 0; overflow: hidden; background: #0a0a0a; backface-visibility: hidden; }
+  .fold-face img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .lab { position: absolute; left: 8px; top: 7px; z-index: 5; font-size: 11px; letter-spacing: 0.08em;
     font-weight: 500; color: #fff; background: rgba(0,0,0,0.42); padding: 2px 6px; border-radius: 3px;
     display: none; pointer-events: none; }
@@ -197,7 +201,11 @@ function initImages() { CELL_IDS.forEach((id) => { const el = cells[id]; if (!po
 // way, so you can see the orchestration. PULSE uses the crna 4-side pull.
 const SIDES = ['up', 'left', 'down', 'right'];
 const EASE = 'cubic-bezier(.4,.05,.2,1)';
-let pulseSide = 0;
+const FOLD_EASE = 'cubic-bezier(.76,0,.24,1)';         // ≈ the 'pageTransition' ease the fold-ribbon used
+const FOLDS3D = [                                       // the hinge seam cycles through all four edges
+  { axis: 'x', sign: 1 }, { axis: 'y', sign: 1 }, { axis: 'x', sign: -1 }, { axis: 'y', sign: -1 },
+];
+let pulseSide = 0, foldIdx3d = 0;
 function popFlash(el, peak, decay, color) {
   const fl = el._flash;
   fl.style.background = color || '#fff';
@@ -229,18 +237,32 @@ function doTransition(el, spec, url) {
     setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.opacity = '0'; front.style.clipPath = 'inset(0% 0% 0% 0%)'; front.style.zIndex = '0'; back.style.zIndex = '1'; }, dur + 40);
     return;
   }
-  if (spec.kind === 'fold') {                            // the silent-house fold: new image sits full
-    const side = SIDES[pulseSide++ % SIDES.length];      // behind, old image hinges back on a cycling edge
-    back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.borderRadius = '0'; back.style.zIndex = '0'; back.style.transformOrigin = 'center';
-    front.style.zIndex = '1'; front.style.transition = 'none'; front.style.opacity = '1'; front.style.clipPath = 'inset(0 0 0 0)'; front.style.borderRadius = '0';
-    front.style.transformOrigin = side === 'up' ? 'top' : side === 'down' ? 'bottom' : side === 'left' ? 'left' : 'right';
-    front.style.transform = 'rotateX(0deg)';
-    void front.offsetWidth;
-    const rot = side === 'up' ? 'rotateX(-90deg)' : side === 'down' ? 'rotateX(90deg)' : side === 'left' ? 'rotateY(90deg)' : 'rotateY(-90deg)';
-    front.style.transition = `transform ${dur}ms ${EASE}`;
-    front.style.transform = rot;
-    el._front = bk;
-    setTimeout(() => { if (el._txn !== myTxn) return; front.style.transition = 'none'; front.style.transform = 'none'; front.style.transformOrigin = 'center'; front.style.opacity = '0'; front.style.zIndex = '0'; }, dur + 40);
+  if (spec.kind === 'fold') {                            // the DYNAMIC fold-ribbon: a 2-face prism whose hinge
+    const W = el.offsetWidth, H = el.offsetHeight;        // rotates 90° — the incoming work turns toward you as
+    const fld = FOLDS3D[foldIdx3d++ % FOLDS3D.length];    // the outgoing folds away into black, seam cycling all sides
+    const R = (fld.axis === 'x' ? H : W) / 2, rot = fld.axis === 'x' ? 'rotateX' : 'rotateY';
+    el.style.perspective = (Math.max(W, H) * 1.5) + 'px';   // perspective scales with the tile → consistent fold on any size
+    const hinge = document.createElement('div'); hinge.className = 'fold-hinge';
+    const oF = document.createElement('div'); oF.className = 'fold-face';
+    const iF = document.createElement('div'); iF.className = 'fold-face';
+    const oImg = document.createElement('img'); oImg.src = front.src;   // current work on the front face
+    const iImg = document.createElement('img'); iImg.src = u;           // incoming, folded at the seam
+    oF.appendChild(oImg); iF.appendChild(iImg);
+    oF.style.transform = `${rot}(0deg) translateZ(${R}px)`;
+    iF.style.transform = `${rot}(${fld.sign * 90}deg) translateZ(${R}px)`;
+    hinge.append(oF, iF); el.appendChild(hinge);
+    hinge.style.transform = `translateZ(${-R}px) ${rot}(0deg)`;
+    el._layers[0].style.visibility = 'hidden'; el._layers[1].style.visibility = 'hidden';   // hide the flat layers; the prism carries it
+    void hinge.offsetWidth;
+    hinge.style.transition = `transform ${dur}ms ${FOLD_EASE}`;
+    hinge.style.transform = `translateZ(${-R}px) ${rot}(${-fld.sign * 90}deg)`;
+    el._folding = true;
+    setTimeout(() => {
+      el._layers[0].style.visibility = ''; el._layers[1].style.visibility = ''; el.style.perspective = ''; hinge.remove(); el._folding = false;
+      if (el._txn !== myTxn) return;
+      back.style.transition = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.transform = 'none'; back.style.opacity = '1'; back.style.zIndex = '0';
+      front.style.opacity = '0'; el._front = bk;                         // settle the incoming flat
+    }, dur + 40);
     return;
   }
   if (spec.kind === 'pull') {                            // the crna move: new image sits full BEHIND,
@@ -337,7 +359,7 @@ function fire(vname, n, t, audioFn) {
     if (el.style.display === 'none' || el._packHidden || el._rotating) return;   // hidden / mid-relocation
     if (el._veil && el._veil.style.opacity === '1') return;    // blacked-out (negative-space) tile
     if (mode === 'repack') {                                  // lead (pulse) FOLDS; the rest crossfade in place
-      if (vname === 'pulse') { if (n - el._lastSwap >= 2) { doTransition(el, VSPEC.pulse, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }
+      if (vname === 'pulse') { if (!el._folding && n - el._lastSwap >= 2) { doTransition(el, VSPEC.pulse, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }
       else if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; }
       return;
     }
@@ -458,6 +480,7 @@ function rotateRepack() {
   if (!free.length) return;
   const vs = Object.keys(slotByVoice); if (!vs.length) return;
   const v = vs[Math.floor(rng() * vs.length)], el = cells[binding[v]], newSlot = free[Math.floor(rng() * free.length)];
+  if (el._folding) return;                               // don't relocate a tile mid-fold
   slotByVoice[v] = newSlot; el._rotating = true;
   el.style.transition = 'opacity .42s ease'; el.style.opacity = '0';
   setTimeout(() => {
