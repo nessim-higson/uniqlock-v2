@@ -18,11 +18,27 @@ core mechanic before wiring the final thing.
 **Current focus:** `orchestra` — a grid where each voice of a track drives a
 region of the screen.
 
-**Current build:** `r50-crna-css` (commit `ec3f6ca`, 2026-06-16) — the orchestra
+**Current build:** `r51-repack-hybrid` (commit `c439907`, 2026-06-16) — the orchestra
 on Strata imagery, with the **R25 crna four-side pull-back** as PULSE's transition
 (pure CSS, GSAP removed — see Open decisions #4), the IAAH metronome box keeping
-time, three modes (subdivide / repack / breathe), tempo fader, accent + warm-black
-design pass. SUBDIVIDE layouts vary by tempo (PULSE not always the hero).
+time, three modes (subdivide / **repack-reworked** / **breathe-cracked**), tempo
+fader, accent + warm-black design pass. SUBDIVIDE layouts vary by tempo (PULSE not
+always the hero) — **untouched, the user's favorite**.
+
+**This round (r51) reworked two modes** in response to user direction:
+- **REPACK → the subdivide×repack hybrid.** Old repack just cycled 4 fixed layouts
+  once per 32-beat section ("not constantly changing"). Now: tempo = density (1 full
+  image at 60 BPM; voices+images form in as you slide up), and the grid recomposes
+  **every bar (4 beats)** via a guillotine slice-packer (varied, gapless rectangles,
+  absolute %-positioned cells animating into place together). Some regions fall to
+  **BLACK** (a per-cell `.veil`) as negative space instead of always holding an image
+  — PULSE stays present, more density allows more black. Recompose also fires the
+  instant tempo crosses a tier.
+- **BREATHE → cracked.** Old breathe swelled grid *tracks*, so one cell's inhale shrank
+  every neighbour → global per-beat jitter (the distraction). Now **local** (scale
+  inside the hero cell's own frame via a new `.inner` layer, neighbours never move)
+  and **slow** (one calm inhale/exhale per bar on the lead block only).
+- Cells gained `.inner` (breath-scaled) + `.veil` (negative space) layers.
 
 **Live:**
 - Slate / all comps → https://nessim-higson.github.io/uniqlock-v2/comps/
