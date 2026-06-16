@@ -26,7 +26,10 @@ FIT/FILL. **r61-morph-fill** (commit `468f561`) reworked its FIT packer to **fil
 width, each stacks its native-AR images, the whole thing scales so the **tallest column fills the
 height**, short columns leave ragged black at their bottoms (distributed, not a centred island).
 Verified landscape fills vertical 2→99% + most of the width. Listed on the comps slate as
-"Orchestra — Morph". The MAIN `comps/orchestra` is separate and unchanged (r60 crna).
+"Orchestra — Morph". **r64-morph-minbeat-crna** (commit `a6362d4`): repack @ 60 BPM now matches
+subdivide @ 60 BPM — at the minimal beat (1 voice) repack shows **one full-screen image and fires
+the crna** on it (`placeMinBeat` + `fire` no longer early-returns for repack at 1 voice), instead of
+the morph engine's crossfade. The MAIN `comps/orchestra` is separate (r63 crna).
 
 **Current main build:** `r63-minbeat-crna` (commit `43cb046`, 2026-06-16) — the lead (pulse) does the
 **CRNA four-side pull-back at every tempo, including the minimal beat**. Removed r62's `MIN_WIPE`
