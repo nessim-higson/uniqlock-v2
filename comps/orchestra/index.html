@@ -108,6 +108,7 @@
   <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
   <div class="chip on" data-mode="repack">REPACK</div>
   <div class="chip sep">·</div>
+  <div class="chip on" id="styleChip">RIGID</div>
   <div class="chip on" id="labelChip">LABELS</div>
 </div>
 
@@ -368,9 +369,10 @@ function fire(vname, n, t, audioFn) {
     const el = cells[area];
     if (el.style.display === 'none' || el._packHidden || el._rotating) return;   // hidden / mid-relocation
     if (el._veil && el._veil.style.opacity === '1') return;    // blacked-out (negative-space) tile
-    if (mode === 'repack') {                                  // lead (pulse) does its transition; the rest crossfade in place
-      if (vname === 'pulse') { if (n - el._lastSwap >= spec.swap) { doTransition(el, spec, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }
-      else if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; }
+    if (mode === 'repack') {
+      if (repackStyle === 'reframe' && activeVoiceList().length > 1) return;   // REFRAME morph owns its imagery (except the minimal beat)
+      if (vname === 'pulse') { if (n - el._lastSwap >= spec.swap) { doTransition(el, spec, nextImgForAR(el.offsetWidth / Math.max(1, el.offsetHeight))); el._lastSwap = n; } }   // lead crna
+      else if (n - el._lastSwap >= spec.swap) { repackSwap(el); el._lastSwap = n; }   // RIGID: others crossfade in place
       return;
     }
     if (n - el._lastSwap >= spec.swap) { doTransition(el, spec); el._lastSwap = n; }
@@ -413,6 +415,7 @@ let GC = 16, GR = 10;
 const GUT = 0.05;                                       // proportional shrink (5%) → black gaps, AR preserved exactly
 const REPACK_PERIOD = 4;                                // relocate one image every bar
 let scaffold = [], slotByVoice = {}, lastTierCount = -1, repackBar = -1, recentImg = [];
+let repackStyle = 'rigid';   // the RIGID/REFRAME switch: 'rigid' = fixed-tile collage, 'reframe' = morphing columns
 function setLayerImg(lay, url) { lay.onload = () => { if (lay.naturalHeight && arMap[url] === undefined) arMap[url] = lay.naturalWidth / lay.naturalHeight; }; lay.src = url; }
 // pick an image whose native AR is close to a target (so cover barely crops),
 // avoiding the most-recent few.
@@ -510,12 +513,99 @@ function repackSwap(el) {
   back.style.transition = 'opacity .5s ease'; back.style.opacity = '1'; el._front = bk;
   setTimeout(() => { if (el._front === bk) front.style.opacity = '0'; }, 520);
 }
-function stepRepack(instant) {
+function rigidStep(instant) {                            // RIGID = the fixed-tile collage (r52 bones)
   if (instant) { lastTierCount = activeVoiceList().length; repackBar = Math.floor(beatN / REPACK_PERIOD); buildAndPlace(true); return; }
   const live = activeVoiceList().length;
   if (live !== lastTierCount) { lastTierCount = live; repackBar = Math.floor((beatN - 1) / REPACK_PERIOD); buildAndPlace(false); return; }   // tempo crossed a tier → new layout (resizes the imagery)
   const bar = Math.floor((beatN - 1) / REPACK_PERIOD);
   if (bar !== repackBar) { repackBar = bar; rotateRepack(); }
+}
+// the RIGID/REFRAME switch dispatches to the right engine
+function stepRepack(instant) { if (repackStyle === 'reframe') rfStep(instant); else rigidStep(instant); }
+// minimal beat (one voice): both styles show ONE full-screen image; fire() does the crna on it
+function placeMinBeat(instant) {
+  binding['pulse'] = 'pulse';
+  const el = cells['pulse'];
+  el.style.display = ''; el.style.transition = 'none'; el._packHidden = false; el._veil.style.opacity = '0';
+  el.style.left = '0%'; el.style.top = '0%'; el.style.width = '100%'; el.style.height = '100%'; el.style.opacity = '1';
+  const lay = el._layers[el._front]; if (!lay.src) { setLayerImg(lay, nextImg()); lay.style.opacity = '1'; }
+  CELL_IDS.forEach((id) => { if (id !== 'pulse') { const c = cells[id]; c.style.display = 'none'; c.style.opacity = '0'; c._packHidden = true; } });
+}
+
+// ── REFRAME engine: the morph build's repack — dynamic columns that re-roll
+// every bar and morph/slide to fill the viewport (staggered masonry). ──
+let rfImgs = [], rfNext = [], rfN = 0, rfCols = [], rfLastRoll = -99, rfFit = true;
+const RF_PERIOD = 4;                                    // re-roll the layout every bar
+function rfPeriodFor(i) { return Math.max(2, 5 - i); }
+function rfPick() { return { url: nextImg() }; }
+function rfArOf(i) { return arMap[rfImgs[i].url] || 0.72; }
+function rfHash(n) { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+function rfRoll(N) {                                     // slot 0 = parent; rest group into 1/2/3 stacks; order shuffled
+  if (N <= 1) return [[0]];
+  const cols = [[0]]; let i = 1;
+  while (i < N) { const rem = N - i; const take = (rem >= 3 && rng() < 0.22) ? 3 : (rem >= 2 && rng() < 0.5) ? 2 : 1; const g = []; for (let k = 0; k < take; k++) g.push(i + k); cols.push(g); i += take; }
+  for (let k = cols.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [cols[k], cols[j]] = [cols[j], cols[k]]; }
+  return cols;
+}
+function rfPack(vw, vh) {                                // staggered masonry, fills the viewport
+  const weights = rfCols.map((g, ci) => 0.7 + rfHash(g[0] + ci * 7.3) * 0.95);
+  const wsum = weights.reduce((a, b) => a + b, 0);
+  const cw = weights.map((w) => w / wsum * vw);
+  if (!rfFit) {
+    const rects = new Array(rfN); let cx = 0;
+    rfCols.forEach((g, ci) => { const W = cw[ci], inv = g.reduce((s, si) => s + 1 / rfArOf(si), 0); let cy = 0; g.forEach((si) => { const h = vh * (1 / rfArOf(si)) / inv; rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); cx += W; });
+    return rects;
+  }
+  const offs = rfCols.map((g) => rfHash(g[0] * 3.1 + 1) * 0.13);
+  const colH = rfCols.map((g, ci) => (offs[ci] * vh) + g.reduce((s, si) => s + cw[ci] / rfArOf(si), 0));
+  const s = Math.min(1.55, Math.max(0.55, vh / Math.max(...colH)));
+  const widths = cw.map((w) => w * s);
+  const used = widths.reduce((a, b) => a + b, 0), startX = (vw - used) * 0.5;
+  const rects = new Array(rfN); let cx = startX;
+  rfCols.forEach((g, ci) => { const W = widths[ci]; let cy = offs[ci] * vh * s; g.forEach((si) => { const h = W / rfArOf(si); rects[si] = { x: cx, y: cy, w: W, h }; cy += h; }); cx += W; });
+  return rects;
+}
+function rfSwap(el, url) {
+  const f = el._front, bk = 1 - f, back = el._layers[bk], front = el._layers[f];
+  back.style.transition = 'none'; back.style.transform = 'none'; back.style.clipPath = 'inset(0 0 0 0)'; back.style.opacity = '0'; setLayerImg(back, url); void back.offsetWidth;
+  back.style.transition = 'opacity .5s ease'; back.style.opacity = '1'; el._front = bk;
+  setTimeout(() => { if (el._front === bk) front.style.opacity = '0'; }, 520);
+}
+const RF_MORPH = 'left .7s cubic-bezier(.5,.05,.2,1), top .7s cubic-bezier(.5,.05,.2,1), width .7s cubic-bezier(.5,.05,.2,1), height .7s cubic-bezier(.5,.05,.2,1)';
+function rfLayout(changed, instant) {
+  const vw = innerWidth, vh = innerHeight, g = Math.max(6, vw * 0.011);
+  const rects = rfPack(vw, vh);
+  const live = new Set();
+  for (let i = 0; i < rfN; i++) {
+    const r = rects[i]; if (!r) continue;
+    const el = cells[CELL_IDS[i]]; live.add(CELL_IDS[i]);
+    const appearing = el._packHidden || el.style.display === 'none';
+    el.style.display = ''; el._veil.style.opacity = '0'; el._packHidden = false;
+    el.style.transition = (instant || appearing) ? 'none' : RF_MORPH;
+    el.style.left = ((r.x + g / 2) / vw * 100) + '%'; el.style.top = ((r.y + g / 2) / vh * 100) + '%';
+    el.style.width = (Math.max(1, r.w - g) / vw * 100) + '%'; el.style.height = (Math.max(1, r.h - g) / vh * 100) + '%';
+    if (instant) { const lay = el._layers[el._front]; setLayerImg(lay, rfImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '1'; }
+    else if (appearing) { const lay = el._layers[el._front]; setLayerImg(lay, rfImgs[i].url); lay.style.opacity = '1'; el.style.opacity = '0'; void el.offsetWidth; el.style.transition = RF_MORPH + ', opacity .5s ease'; el.style.opacity = '1'; }
+    else { el.style.opacity = '1'; if (changed.has(i)) rfSwap(el, rfImgs[i].url); }
+  }
+  CELL_IDS.forEach((id) => { if (!live.has(id)) hideRepack(cells[id], instant); });
+}
+function rfStep(instant) {
+  const N = Math.min(activeVoiceList().length, CELL_IDS.length);
+  if (N === 1) { if (rfN !== 1 || instant) { rfN = 1; placeMinBeat(instant); } return; }   // minimal beat → full-screen crna (fire)
+  if (instant) {
+    rfN = N; rfImgs.length = N; rfNext.length = N; rfCols = rfRoll(N); rfLastRoll = beatN;
+    for (let i = 0; i < N; i++) { rfImgs[i] = rfPick(); rfNext[i] = beatN + 1 + (i % 3); }
+    rfLayout(new Set(), true); return;
+  }
+  const changed = new Set(); let structural = false;
+  if (N !== rfN) {
+    structural = true;
+    if (N > rfN) for (let i = rfN; i < N; i++) { rfImgs[i] = rfPick(); rfNext[i] = beatN + rfPeriodFor(i); }
+    rfN = N; rfImgs.length = N; rfNext.length = N; rfCols = rfRoll(N); rfLastRoll = beatN;
+  } else if (beatN - rfLastRoll >= RF_PERIOD) { rfLastRoll = beatN; rfCols = rfRoll(N); structural = true; }
+  for (let i = 0; i < N; i++) { if (beatN >= rfNext[i]) { rfImgs[i] = rfPick(); rfNext[i] = beatN + rfPeriodFor(i); changed.add(i); } }
+  if (structural || changed.size) rfLayout(changed, false);
 }
 
 // SUBDIVIDE in/out: keep the favored tiled layout, but let cells fade to BLACK
@@ -588,11 +678,18 @@ document.querySelectorAll('#modes .chip[data-mode]').forEach((c) => c.addEventLi
 const labelChip = document.getElementById('labelChip');
 function toggleLabels() { const on = grid.classList.toggle('labels'); labelChip.classList.toggle('on', on); }
 labelChip.addEventListener('click', toggleLabels);
+const styleChip = document.getElementById('styleChip');
+function toggleStyle() {                                  // the RIGID ⇄ REFRAME switch
+  repackStyle = repackStyle === 'rigid' ? 'reframe' : 'rigid';
+  styleChip.textContent = repackStyle === 'rigid' ? 'RIGID' : 'REFRAME';
+  if (mode === 'repack') { rfN = 0; scaffold = []; lastTierCount = -1; grid.classList.add('pack'); stepRepack(true); }   // rebuild with the chosen engine
+}
+styleChip.addEventListener('click', toggleStyle);
 const MODE_KEYS = { '1': 'subdivide', '2': 'repack' };
-document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); });
+document.addEventListener('keydown', (e) => { if (MODE_KEYS[e.key]) setMode(MODE_KEYS[e.key]); else if (e.key === 'l' || e.key === 'L') toggleLabels(); else if (e.key === 'r' || e.key === 'R') toggleStyle(); });
 
 // keyboard access for the chip/button controls
-[playBtn, labelChip, fader, ...document.querySelectorAll('#modes .chip[data-mode]')].forEach((el) => {
+[playBtn, labelChip, styleChip, fader, ...document.querySelectorAll('#modes .chip[data-mode]')].forEach((el) => {
   el.tabIndex = 0; el.setAttribute('role', 'button');
   el.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && el !== fader) { e.preventDefault(); el.click(); } });
 });
@@ -605,7 +702,7 @@ fader.addEventListener('pointermove', (e) => { if (drag) bpmFromX(e.clientX); })
 fader.addEventListener('pointerup', () => { drag = false; });
 fader.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft') { bpm = Math.max(BPM_MIN, bpm - 2); paintFader(); } else if (e.key === 'ArrowRight') { bpm = Math.min(BPM_MAX, bpm + 2); paintFader(); } });
 playBtn.addEventListener('click', () => { running = !running; playBtn.textContent = running ? '❚❚' : '▶'; if (ctx) { running ? ctx.resume() : ctx.suspend(); } });
-window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (scaffold.length) buildAndPlace(true); } else applyModeLayout(); });
+window.addEventListener('resize', () => { lastLayoutKey = ''; if (mode === 'repack') { if (activeVoiceList().length === 1) placeMinBeat(true); else if (repackStyle === 'reframe') { if (rfN) rfLayout(new Set(), true); } else if (scaffold.length) buildAndPlace(true); } else applyModeLayout(); });
 document.addEventListener('pointerdown', () => { if (ctx && ctx.state === 'suspended') ctx.resume(); }, { passive: true });   // mobile: keep audio alive if iOS suspends the context
 
 // choreographed entry — blocks assemble in, staggered
