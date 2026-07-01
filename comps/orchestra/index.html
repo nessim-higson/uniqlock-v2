@@ -719,7 +719,12 @@ function revealGrid() {
 overlay.addEventListener('click', async () => {
   if (entered) return;
   entered = true;
-  ctx = new AudioContext();
+  // iOS: play through the media session so the hardware silent switch doesn't mute us
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  const AC = window.AudioContext || window.webkitAudioContext;   // Safari prefix fallback
+  ctx = new AC();
+  // iOS unlock: fire a one-sample silent buffer inside the gesture to start the context
+  try { const b = ctx.createBufferSource(); b.buffer = ctx.createBuffer(1, 1, 22050); b.connect(ctx.destination); b.start(0); } catch (e) {}
   master = ctx.createGain(); master.gain.value = 0.9; master.connect(ctx.destination);
   space = ctx.createConvolver(); space.buffer = makeIR(3.2);
   const rev = ctx.createGain(); rev.gain.value = 0.34; space.connect(rev); rev.connect(master);
