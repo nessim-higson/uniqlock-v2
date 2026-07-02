@@ -31,7 +31,13 @@ subdivide @ 60 BPM — at the minimal beat (1 voice) repack shows **one full-scr
 the crna** on it (`placeMinBeat` + `fire` no longer early-returns for repack at 1 voice), instead of
 the morph engine's crossfade. The MAIN `comps/orchestra` is separate (r63 crna).
 
-**Current main build:** `r68-scale-drama` (2026-07-02) — RIGID's scaffold now builds a
+**Current main build:** `r69-reframe-no-cross` (2026-07-02) — **REFRAME is now the default
+engine** (user preference) and its per-bar re-roll **no longer shuffles column order**: with
+monotonic slot order, morphs only re-weight columns / re-stack in place — tiles can never
+travel across the screen sliding under one another (the distracting crossing). The liked
+shifting (resize/re-stack morph) is untouched. Prior:
+
+`r68-scale-drama` — RIGID's scaffold now builds a
 **HERO + shrinking satellites** instead of uniform tiles: one dominant image holds ~half the
 frame (rule-of-thirds placement, never relocated) while satellite tiles decay in size per rank
 AND shrink further as more voices join — so the scale contrast between biggest and smallest
