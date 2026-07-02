@@ -108,7 +108,7 @@
   <div class="chip" data-mode="subdivide">SUBDIVIDE</div>
   <div class="chip on" data-mode="repack">REPACK</div>
   <div class="chip sep">·</div>
-  <div class="chip on" id="styleChip">RIGID</div>
+  <div class="chip on" id="styleChip">REFRAME</div>
   <div class="chip on" id="labelChip">LABELS</div>
 </div>
 
@@ -415,7 +415,7 @@ let GC = 16, GR = 10;
 const GUT = 0.05;                                       // proportional shrink (5%) → black gaps, AR preserved exactly
 const REPACK_PERIOD = 4;                                // relocate one image every bar
 let scaffold = [], slotByVoice = {}, lastTierCount = -1, repackBar = -1, recentImg = [];
-let repackStyle = 'rigid';   // the RIGID/REFRAME switch: 'rigid' = fixed-tile collage, 'reframe' = morphing columns
+let repackStyle = 'reframe';   // the RIGID/REFRAME switch: 'reframe' = morphing columns (preferred), 'rigid' = fixed-tile collage
 function setLayerImg(lay, url) { lay.onload = () => { if (lay.naturalHeight && arMap[url] === undefined) arMap[url] = lay.naturalWidth / lay.naturalHeight; }; lay.src = url; }
 // pick an image whose native AR is close to a target (so cover barely crops),
 // avoiding the most-recent few.
@@ -555,7 +555,9 @@ function rfRoll(N) {                                     // slot 0 = parent; res
   if (N <= 1) return [[0]];
   const cols = [[0]]; let i = 1;
   while (i < N) { const rem = N - i; const take = (rem >= 3 && rng() < 0.22) ? 3 : (rem >= 2 && rng() < 0.5) ? 2 : 1; const g = []; for (let k = 0; k < take; k++) g.push(i + k); cols.push(g); i += take; }
-  for (let k = cols.length - 1; k > 0; k--) { const j = Math.floor(rng() * (k + 1)); [cols[k], cols[j]] = [cols[j], cols[k]]; }
+  // NO column shuffle — order stays monotonic by slot index, so during a morph
+  // tiles only re-weight / re-stack in place and can never travel across the
+  // screen sliding under one another (that was the distracting crossing).
   return cols;
 }
 function rfPack(vw, vh) {                                // staggered masonry, fills the viewport
