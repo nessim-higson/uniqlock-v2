@@ -441,25 +441,36 @@ function setRect(el, r) {
   void el.offsetWidth;
 }
 // fresh scaffold: each tile picks an image and is sized to that image's native AR
-// (so it isn't cropped), at a target AREA set by tempo — fewer lit ⇒ bigger.
+// (so it isn't cropped). SCALE DRAMA: one HERO tile stays dominant while the
+// satellites shrink as more voices come in — the contrast between the biggest
+// and smallest image GROWS with the music's sophistication, instead of
+// everything flattening into uniform mid-size tiles.
 function buildScaffold(lit, spares) {
   const portrait = innerHeight > innerWidth;
   GC = portrait ? 13 : 20; GR = portrait ? 20 : 13;
   const total = GC * GR, cellR = (innerWidth / GC) / (innerHeight / GR);   // pixel AR of one grid cell
   const occ = Array.from({ length: GR }, () => new Array(GC).fill(false));
   const want = lit + spares;
-  const baseA = Math.min(total * 0.66, Math.max(20, total * 0.6 / Math.max(1, lit)));   // bigger area when fewer are lit
+  // area targets, biggest first: the hero holds near half the frame; satellites
+  // start medium and decay per rank — and their base shrinks as more voices join.
+  const heroA = total * (lit <= 2 ? 0.55 : 0.45);
+  const satBase = total * 0.6 / (Math.max(2, lit) * 1.5);
+  const targets = [heroA];
+  for (let i = 1; i < want; i++) targets.push(Math.max(6, satBase * Math.pow(0.78, i - 1)));
   const tiles = []; let tries = 0;
-  while (tiles.length < want && tries < 600) {
+  while (tiles.length < want && tries < 900) {
     tries++;
-    const u = nextImgForAR(0.6 + rng() * 1.4), a = arMap[u] || 1.4;        // an image + its native AR
-    const A = baseA * (0.72 + rng() * 0.56);                               // jittered target area (cells)
+    const ti = tiles.length;
+    const u = nextImgForAR(ti === 0 ? (0.9 + rng() * 0.9) : (0.6 + rng() * 1.4)), a = arMap[u] || 1.4;   // hero leans landscape-ish
+    const A = targets[ti] * (0.85 + rng() * 0.3);                          // jittered target area (cells)
     let th = Math.round(Math.sqrt(A * cellR / a)), tw = Math.round(th * a / cellR);
     th = Math.max(2, Math.min(GR, th)); tw = Math.max(2, Math.min(GC, tw));
     let bestErr = Infinity, bw = tw, bh = th;                              // snap to the integer cell-dims whose AR is closest to the image's
     for (let dh = -1; dh <= 1; dh++) for (let dw = -1; dw <= 1; dw++) { const H2 = th + dh, W2 = tw + dw; if (H2 < 2 || W2 < 2 || H2 > GR || W2 > GC) continue; const err = Math.abs(Math.log((W2 / H2) * cellR / a)); if (err < bestErr) { bestErr = err; bw = W2; bh = H2; } }
     tw = bw; th = bh;
-    const cx = Math.floor(rng() * (GC - tw + 1)), cy = Math.floor(rng() * (GR - th + 1));
+    // the hero sits inward (rule-of-thirds-ish); satellites land anywhere free
+    const cx = ti === 0 ? Math.round((GC - tw) * (0.15 + rng() * 0.7)) : Math.floor(rng() * (GC - tw + 1));
+    const cy = ti === 0 ? Math.round((GR - th) * (0.15 + rng() * 0.7)) : Math.floor(rng() * (GR - th + 1));
     let free = true;
     for (let y = cy; y < cy + th && free; y++) for (let x = cx; x < cx + tw; x++) { if (occ[y][x]) { free = false; break; } }
     if (!free) continue;
@@ -491,7 +502,7 @@ function rotateRepack() {
   const occupied = new Set(Object.values(slotByVoice));
   const free = []; for (let i = 0; i < scaffold.length; i++) if (!occupied.has(i)) free.push(i);
   if (!free.length) return;
-  const vs = Object.keys(slotByVoice); if (!vs.length) return;
+  const vs = Object.keys(slotByVoice).filter((v) => slotByVoice[v] !== 0); if (!vs.length) return;   // never relocate the hero — the drama anchor stays
   const v = vs[Math.floor(rng() * vs.length)], el = cells[binding[v]], newSlot = free[Math.floor(rng() * free.length)];
   if (el._folding) return;                               // don't relocate a tile mid-fold
   slotByVoice[v] = newSlot; el._rotating = true;
