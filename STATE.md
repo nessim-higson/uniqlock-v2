@@ -31,13 +31,10 @@ subdivide @ 60 BPM — at the minimal beat (1 voice) repack shows **one full-scr
 the crna** on it (`placeMinBeat` + `fire` no longer early-returns for repack at 1 voice), instead of
 the morph engine's crossfade. The MAIN `comps/orchestra` is separate (r63 crna).
 
-**Current main build:** `r70-reframe-no-slide` (2026-07-02) — REFRAME now follows the RIGID
-grammar: **positions never animate**. A tile whose rect changes on the bar re-roll fades out
-in place and reappears at its new rect (token-guarded fade-through); unchanged tiles just
-crossfade imagery in place. No tile ever travels or slides under another — the re-roll reads
-as a soft edit. Prior:
-
-`r69-reframe-no-cross` — **REFRAME became the default
+**Current main build:** `r69-reframe-no-cross` (2026-07-02, REVERTED back to from r70) —
+user preferred the morphing motion after all: r70 replaced all position tweens with
+fade-throughs and was rolled back same-day (kept frozen at `versions/r70-reframe-no-slide`
+as the rejected experiment). Current = r69: **REFRAME is the default
 engine** (user preference) and its per-bar re-roll **no longer shuffles column order**: with
 monotonic slot order, morphs only re-weight columns / re-stack in place — tiles can never
 travel across the screen sliding under one another (the distracting crossing). Prior:
